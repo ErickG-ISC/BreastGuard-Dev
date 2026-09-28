@@ -3,7 +3,7 @@ from tensorflow.keras.models import load_model
 from tensorflow.keras.preprocessing import image
 import os
 
-MODEL_PATH = "models/breast_cancer_model.h5"  # Asegúrate de tener el modelo aquí
+MODEL_PATH = "models/breast_cancer_model.h5"  #  Tener el modelo aquí
 
 class BreastCancerModel:
     def __init__(self):
