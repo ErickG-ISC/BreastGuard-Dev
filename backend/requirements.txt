@@ -4,3 +4,10 @@ sqlalchemy==2.0.23
 psycopg2-binary==2.9.13
 pydantic==2.12.5
 python-multipart==0.0.6
+python-jose
+passlib 
+bcrypt
+boto3
+tensorflow 
+numpy 
+pillow
