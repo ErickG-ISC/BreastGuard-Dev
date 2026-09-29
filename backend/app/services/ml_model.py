@@ -1,9 +1,10 @@
+import os
+
 import numpy as np
 from tensorflow.keras.models import load_model
 from tensorflow.keras.preprocessing import image
-import os
 
-MODEL_PATH = "models/breast_cancer_model.h5"  #  Tener el modelo aquí
+MODEL_PATH = os.environ.get("MODEL_PATH", "models/breast_cancer_model.h5")
 
 class BreastCancerModel:
     def __init__(self):

@@ -5,9 +5,10 @@ psycopg2-binary==2.9.13
 pydantic==2.12.5
 python-multipart==0.0.6
 python-jose
-passlib 
+passlib
 bcrypt
 boto3
+python-dotenv
 #tensorflow 
 tensorflow-cpu #Para el plan gratuito de Render
 numpy 
