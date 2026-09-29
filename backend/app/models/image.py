@@ -1,6 +1,7 @@
 from sqlalchemy import Column,Integer,String,Float,ForeignKey,DateTime
 from sqlalchemy.orm import relationship
-from backend.models.database import Base
+from sqlalchemy.sql import func
+from backend.app.models.database import Base
 
 class MedicalImage(Base):
     __tablename__ = "medical_images"

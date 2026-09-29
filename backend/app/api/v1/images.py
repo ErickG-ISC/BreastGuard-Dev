@@ -1,8 +1,8 @@
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
 from sqlalchemy.orm import Session
-from backend.models.database import SessionLocal
-from backend.models.image import MedicalImage
-from backend.services.s3 import upload_file_to_s3
+from backend.app.models.database import SessionLocal
+from backend.app.models.image import MedicalImage
+from backend.app.services.storage import store_uploaded_file
 import uuid
 import os
 
@@ -23,15 +23,16 @@ async def upload_image(
     db: Session = Depends(get_db)
 ):
     # Guardar archivo temporalmente
+    os.makedirs("temp", exist_ok=True)
     file_path = f"temp/{uuid.uuid4()}{file.filename}"
     with open(file_path, "wb") as buffer:
         buffer.write(await file.read())
 
-    # Subir a S3
-    object_name = f"uploads/{user_id}/{uuid.uuid4()}{file.filename}"
-    image_url = upload_file_to_s3(file_path, object_name)
+    # Guardar la imagen (local en la EC2 por defecto, o S3 si STORAGE_BACKEND=s3)
+    object_name = f"{user_id}/{uuid.uuid4()}{file.filename}"
+    image_url = store_uploaded_file(file_path, object_name)
     if not image_url:
-        raise HTTPException(status_code=500, detail="Failed to upload image to S3")
+        raise HTTPException(status_code=500, detail="Failed to store uploaded image")
 
     # Guardar en DB
     db_image = MedicalImage(

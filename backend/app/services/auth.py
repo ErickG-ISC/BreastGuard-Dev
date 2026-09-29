@@ -1,9 +1,10 @@
+import os
 from datetime import datetime,timedelta
 from jose import JWTError,jwt
 from passlib.context import CryptContext
 from fastapi import HTTPException, status
 
-SECRET_KEY = "tu_clave_secreta_aqui"  # Usa una clave segura en producción
+SECRET_KEY = os.environ.get("SECRET_KEY", "tu_clave_secreta_aqui")  # Define SECRET_KEY por env var en producción
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
