@@ -8,6 +8,7 @@ python-jose
 passlib 
 bcrypt
 boto3
-tensorflow 
+#tensorflow 
+tensorflow-cpu #Para el plan gratuito de Render
 numpy 
 pillow
