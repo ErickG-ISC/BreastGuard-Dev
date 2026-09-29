@@ -1,7 +1,6 @@
 from sqlalchemy import Column, Integer, String, Boolean, DateTime
-from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from backend.app.models.database import Base
+from backend.models.database import Base
 
 class User(Base):
     __tablename__ = "users"
@@ -12,6 +11,6 @@ class User(Base):
     full_name=Column(String)
     is_medical=Column(Boolean,default=False) ## True si es médico
     created_at=Column(DateTime(timezone=True),server_default=func.now())
-    updated_at=Column(DateTime(timezone=True),onupdate=func.now())
+    updated_at=Column(DateTime(timezone=True),on_update=func.now())
     images = relationship("MedicalImage", back_populates="user")
 
