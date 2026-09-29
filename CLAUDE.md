@@ -35,6 +35,8 @@ The backend reads all secrets/connection info from environment variables (no mor
 
 `.python-version` at the repo root pins Python to 3.12 for platforms that read it (e.g. Render) — SQLAlchemy and TensorFlow/`tensorflow-cpu` lag behind the newest CPython releases, so letting a host default to the latest Python (3.13/3.14) breaks the build.
 
+`DATABASE_URL` must point at Supabase's **Session pooler** connection string, not "Direct connection" — Supabase's direct connection host only resolves over IPv6, which Render (and most PaaS providers) can't reach, so it fails with `Network is unreachable`. See the note in `.env.example`.
+
 ### Frontend (`cd frontend` first)
 
 ```
