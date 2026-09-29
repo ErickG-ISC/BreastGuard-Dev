@@ -20,16 +20,20 @@ The app has no `__init__.py` files and relies on namespace packages with absolut
 ```
 python -m venv venv
 venv\Scripts\activate          # Windows
-pip install -r backend/requirements.txt
+pip install -r requirements.txt
 cp .env.example .env           # fill in the values, see "Configuration" below
 uvicorn backend.app.main:app --reload
 ```
+
+`requirements.txt` lives at the repo root (not under `backend/`), so `pip install` must be run from there too.
 
 There is no test suite in the backend yet.
 
 ### Configuration
 
 The backend reads all secrets/connection info from environment variables (no more hardcoded credentials) — see `.env.example` at the repo root for the full list (`DATABASE_URL`, `SECRET_KEY`, `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_REGION`/`S3_BUCKET_NAME`, `FRONTEND_ORIGIN`, `MODEL_PATH`). `main.py` calls `load_dotenv()` before importing anything else, so a `.env` file at the repo root is picked up automatically for local runs; on Render/Railway/etc. set these directly in the platform's environment settings instead. `frontend/.env.example` documents the one frontend variable (`VITE_API_URL`).
+
+`.python-version` at the repo root pins Python to 3.12 for platforms that read it (e.g. Render) — SQLAlchemy and TensorFlow/`tensorflow-cpu` lag behind the newest CPython releases, so letting a host default to the latest Python (3.13/3.14) breaks the build.
 
 ### Frontend (`cd frontend` first)
 
