@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from backend.api.v1 import health, auth, images
+from backend.app.api.v1 import health, auth, images
 
 app = FastAPI()
 app.include_router(health.router,prefix="/api/v1")

@@ -1,8 +1,8 @@
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
 from sqlalchemy.orm import Session
-from backend.models.database import SessionLocal
-from backend.models.image import MedicalImage
-from backend.services.s3 import upload_file_to_s3
+from backend.app.models.database import SessionLocal
+from backend.app.models.image import MedicalImage
+from backend.app.services.s3 import upload_file_to_s3
 import uuid
 import os
 

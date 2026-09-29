@@ -3,7 +3,7 @@ from jose import JWTError,jwt
 from passlib.context import CryptContext
 from fastapi import HTTPException, status
 
-SECRET_KEY = "tu_clave_secreta_aqui"  # Usa una clave segura en producción
+SECRET_KEY = os.environ["SECRET_KEY"]  # Usa una clave segura en producción
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
