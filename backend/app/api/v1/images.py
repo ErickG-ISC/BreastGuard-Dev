@@ -2,7 +2,7 @@ from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
 from sqlalchemy.orm import Session
 from backend.app.models.database import SessionLocal
 from backend.app.models.image import MedicalImage
-from backend.app.services.s3 import upload_file_to_s3
+from backend.app.services.storage import upload_file_to_storage
 import uuid
 import os
 
@@ -27,11 +27,11 @@ async def upload_image(
     with open(file_path, "wb") as buffer:
         buffer.write(await file.read())
 
-    # Subir a S3
+    # Subir a Supabase Storage
     object_name = f"uploads/{user_id}/{uuid.uuid4()}{file.filename}"
-    image_url = upload_file_to_s3(file_path, object_name)
+    image_url = upload_file_to_storage(file_path, object_name)
     if not image_url:
-        raise HTTPException(status_code=500, detail="Failed to upload image to S3")
+        raise HTTPException(status_code=500, detail="Failed to upload image to storage")
 
     # Guardar en DB
     db_image = MedicalImage(

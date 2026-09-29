@@ -7,7 +7,7 @@ python-multipart==0.0.6
 python-jose
 passlib
 bcrypt
-boto3
+supabase
 python-dotenv
 #tensorflow 
 tensorflow-cpu #Para el plan gratuito de Render
