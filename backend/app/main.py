@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.app.api.v1 import admin, auth, health, images
+from backend.app.api.v1 import admin, audit, auth, health, images
 from backend.app.db import assert_safe_db_role
 
 
@@ -34,6 +34,7 @@ app.include_router(health.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1/auth")
 app.include_router(images.router, prefix="/api/v1/images")
 app.include_router(admin.router, prefix="/api/v1/admin")
+app.include_router(audit.router, prefix="/api/v1/audit")
 
 
 @app.get("/")
