@@ -6,6 +6,8 @@
 - [ ] Tener a mano **2 o 3 ecografías públicas** (dataset BUSI) en el celular. **Nunca imágenes de pacientes reales.**
 - [ ] Tener una foto a color cualquiera, para mostrar el rechazo.
 - [ ] Iniciar sesión como `platform_admin` en la laptop.
+- [ ] Tener creadas de antemano: una paciente de **otro tenant** y un `tenant_admin` (para los pasos 5 y 6).
+- [ ] Haber verificado una vez que la IP de la auditoría es la real (ver docs/despliegue.md).
 
 ## Guion
 1. **Multitenencia (CU-12):** como `platform_admin`, en **Tenants**, ir a **Nueva institución**. Se abre el **chequeo de aislamiento**, que debe salir todo en verde y concluyente.

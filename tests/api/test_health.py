@@ -26,3 +26,17 @@ def test_health_sin_base_503_sin_detalles(client):
 def test_la_api_no_permite_cache_http(client):
     response = client.get("/api/v1/health")
     assert response.headers["cache-control"] == "no-store"
+
+
+def test_frontend_origin_tolera_espacios_y_barra_final(monkeypatch):
+    import importlib
+
+    import backend.app.main as main
+
+    monkeypatch.setenv("FRONTEND_ORIGIN", " https://app.vercel.app/ , http://localhost:5173")
+    reloaded = importlib.reload(main)
+    try:
+        assert reloaded.frontend_origins == ["https://app.vercel.app", "http://localhost:5173"]
+    finally:
+        monkeypatch.undo()
+        importlib.reload(main)

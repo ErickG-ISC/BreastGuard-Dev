@@ -20,13 +20,22 @@ El backend va en **Render** (plan gratuito, unos 512 MB) y el frontend en **Verc
 4. Verifica: `https://<tu-api>.onrender.com/api/v1/health` debe responder `{"status":"ok","database":"connected","model":"loaded"}`.
 5. Mide la RAM: en Render → **Metrics → Memory**, después de un análisis. En Docker con 512 MB se midió un pico de 184 MB (ADR 0006).
 
-La app **no arranca** si `DATABASE_URL` trae un rol con BYPASSRLS y falta `APP_DB_PASSWORD`: es intencional.
+La app **no arranca** (falla cerrado, es intencional):
+- si falta `APP_DB_PASSWORD`, porque nunca usa la contraseña del dueño;
+- si el rol con el que se conecta es superusuario, tiene BYPASSRLS o no es `app_user`.
+
+**Pooler:** la app usa el **Transaction pooler** (6543). Es seguro porque el contexto RLS es `set_config(..., true)` por transacción, y el driver (psycopg2) no usa sentencias preparadas del servidor. Las **migraciones** se corren desde tu computadora por el **Session pooler** (5432), con la URL del dueño **con** contraseña de tu `.env` local.
+
+**Verifica la IP real detrás del proxy (`TRUSTED_PROXY_HOPS=1`):**
+1. Inicia sesión como paciente en la app desplegada y abre un análisis.
+2. Como `tenant_admin`, consulta `GET /api/v1/audit` y compara la `ip` con tu IP pública (por ejemplo, la que muestra https://ifconfig.me).
+3. Si aparece una IP de Render o de Cloudflare en lugar de la tuya, ajusta `TRUSTED_PROXY_HOPS` (prueba con `2`) y repite. Sin esto, el límite de peticiones y la auditoría usarían una IP equivocada.
 
 ## 2. Frontend en Vercel
 1. **Add New → Project** y elige el repo, con **Root Directory** `frontend`. Framework: Vite.
 2. Variable de entorno: `VITE_API_URL=https://<tu-api>.onrender.com/api/v1`.
 3. Despliega. `vercel.json` reescribe todas las rutas a `index.html`, que es una SPA.
-4. Vuelve a Render y confirma que `FRONTEND_ORIGIN` coincide exactamente con el dominio de Vercel.
+4. Vuelve a Render y confirma que `FRONTEND_ORIGIN` coincide con el dominio de Vercel, con `https://` (los espacios y la `/` final se ignoran). Los *previews* de Vercel tienen otro dominio y quedarán bloqueados por CORS: es lo esperado.
 
 ## 3. Primer usuario administrador
 Desde tu computadora, con el `.env` apuntando a la misma base:

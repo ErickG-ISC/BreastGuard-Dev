@@ -39,7 +39,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-frontend_origins = os.environ.get("FRONTEND_ORIGIN", "http://localhost:5173").split(",")
+# Tolerante a espacios y a la barra final: el navegador envía el origen sin ellos
+frontend_origins = [
+    origin.strip().rstrip("/")
+    for origin in os.environ.get("FRONTEND_ORIGIN", "http://localhost:5173").split(",")
+    if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=frontend_origins,
