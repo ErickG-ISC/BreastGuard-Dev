@@ -1,15 +1,17 @@
-fastapi==0.109.0
-uvicorn==0.27.0
-sqlalchemy==2.0.36
+fastapi==0.156.4
+uvicorn==0.54.0
+sqlalchemy==2.0.55
+alembic==1.20.0
 psycopg2-binary==2.9.13
-pydantic==2.12.5
-python-multipart==0.0.6
-python-jose
-passlib
-bcrypt
-supabase
-python-dotenv
-#tensorflow 
-tensorflow-cpu #Para el plan gratuito de Render
-numpy 
-pillow
+pydantic==2.14.1
+email-validator==2.3.0
+python-multipart==0.0.32
+python-jose[cryptography]==3.5.0
+passlib==1.7.4
+# passlib 1.7.4 no es compatible con bcrypt >= 4.1; no subir sin cambiar passlib
+bcrypt==4.0.1
+supabase==2.33.0
+python-dotenv==1.2.4
+tensorflow-cpu==2.21.0 # Para el plan gratuito de Render
+numpy==2.5.4
+pillow==13.0.0
