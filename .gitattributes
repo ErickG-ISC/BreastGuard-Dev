@@ -1,0 +1,5 @@
+# Fines de línea LF en el repo (el CI corre en Linux)
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.h5 binary

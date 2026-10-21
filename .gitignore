@@ -14,8 +14,9 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+# Anclados a la raíz para no ignorar carpetas como frontend/src/lib
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -149,6 +150,8 @@ activemq-data/
 
 # Environments
 .env
+.env.*
+!.env.example
 .envrc
 .venv
 env/
@@ -216,3 +219,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# BreastGuard: temporales, modelos y bases locales (nunca datos médicos en git)
+temp/
+*.h5
+*.keras
+*.tflite
+*.onnx
+*.db
+*.sqlite
