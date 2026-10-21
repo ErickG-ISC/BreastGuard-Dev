@@ -1,6 +1,6 @@
-import { Alert, Box, Button, Paper, Stack, TextField, Typography } from '@mui/material';
+import { Alert, Box, Button, Link, Paper, Stack, TextField, Typography } from '@mui/material';
 import { useState } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, Link as RouterLink } from 'react-router-dom';
 import { errorMessage } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { homeFor } from '../auth/roles';
@@ -58,6 +58,12 @@ export default function Login() {
             <Button type="submit" variant="contained" disabled={submitting} size="large">
               {submitting ? 'Entrando…' : 'Entrar'}
             </Button>
+            <Typography variant="body2">
+              ¿Aún no tienes cuenta?{' '}
+              <Link component={RouterLink} to="/registro">
+                Crea una
+              </Link>
+            </Typography>
           </Stack>
         </Paper>
       </Box>

@@ -26,8 +26,18 @@ export default function Home() {
               {user.tenant_slug ? ` en ${user.tenant_slug}` : ''}.
             </Typography>
           ) : (
-            <Button component={RouterLink} to="/login" variant="contained" sx={{ alignSelf: 'start' }}>
-              Iniciar sesión
+            <Stack direction="row" spacing={1}>
+              <Button component={RouterLink} to="/login" variant="contained">
+                Iniciar sesión
+              </Button>
+              <Button component={RouterLink} to="/registro" variant="outlined">
+                Crear cuenta
+              </Button>
+            </Stack>
+          )}
+          {user?.role === 'patient' && (
+            <Button component={RouterLink} to="/paciente" variant="contained" sx={{ alignSelf: 'start' }}>
+              Ir a tu espacio
             </Button>
           )}
           {user?.role === 'platform_admin' && (
