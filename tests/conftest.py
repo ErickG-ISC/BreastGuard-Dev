@@ -19,6 +19,7 @@ from sqlalchemy import create_engine, text  # noqa: E402
 from sqlalchemy.exc import OperationalError  # noqa: E402
 
 from backend.app.api.deps import get_storage  # noqa: E402
+from backend.app.api.rate_limit import limiter  # noqa: E402
 from backend.app.db import get_engine  # noqa: E402
 from backend.app.main import app  # noqa: E402
 from backend.app.services.storage import StorageError  # noqa: E402
@@ -61,6 +62,13 @@ def owner_engine(database):
 
 
 @pytest.fixture(autouse=True)
+def _reset_rate_limiter():
+    limiter.reset()
+    yield
+    limiter.reset()
+
+
+@pytest.fixture(autouse=True)
 def _clean_tables(request):
     yield
     if "owner_engine" not in request.fixturenames:
@@ -81,15 +89,19 @@ class FakeStorage:
     def __init__(self) -> None:
         self.objects: dict[str, bytes] = {}
         self.uploaded_from: list[str] = []
+        self.signed: list[str] = []
         self.fail = False
 
-    def upload_file(self, file_path: str, object_name: str, content_type: str) -> str:
+    def upload_file(self, file_path: str, object_name: str, content_type: str) -> None:
         self.uploaded_from.append(file_path)
         if self.fail:
             raise StorageError
         with open(file_path, "rb") as f:
             self.objects[object_name] = f.read()
-        return f"https://storage.test/{object_name}"
+
+    def create_signed_url(self, object_name: str, expires_in: int) -> str:
+        self.signed.append(object_name)
+        return f"https://storage.test/signed/{object_name}?expires_in={expires_in}"
 
 
 @pytest.fixture
@@ -100,7 +112,8 @@ def storage() -> FakeStorage:
 @pytest.fixture
 def client(owner_engine, storage: FakeStorage):
     app.dependency_overrides[get_storage] = lambda: storage
-    with TestClient(app) as test_client:
+    # IP de documentación (RFC 5737) para que la auditoría registre una IP válida
+    with TestClient(app, client=("198.51.100.7", 50000)) as test_client:
         yield test_client
     app.dependency_overrides.clear()
 
