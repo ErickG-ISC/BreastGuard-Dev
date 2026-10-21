@@ -36,7 +36,12 @@ def create_access_token(user_id: int, expires_delta: timedelta | None = None) ->
 def decode_access_token(token: str) -> int:
     """Verifica firma y expiración y devuelve el id del usuario (`sub`)."""
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(
+            token,
+            SECRET_KEY,
+            algorithms=[ALGORITHM],
+            options={"require_exp": True, "require_sub": True},
+        )
         return int(payload["sub"])
     except (JWTError, KeyError, TypeError, ValueError):
         raise InvalidTokenError from None

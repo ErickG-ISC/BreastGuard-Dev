@@ -1,3 +1,4 @@
+import base64
 import os
 
 import pytest
@@ -78,6 +79,37 @@ class TestUploadAuth:
 
         response = client.post(
             UPLOAD_URL, files=png_file(), headers={"Authorization": f"Bearer {forged}"}
+        )
+        assert response.status_code == 401
+
+    @pytest.mark.parametrize(
+        "claims",
+        [
+            pytest.param({"sub": "SUB"}, id="sin-exp"),
+            pytest.param({"exp": 9999999999}, id="sin-sub"),
+            pytest.param({"sub": "no-numerico", "exp": 9999999999}, id="sub-invalido"),
+        ],
+    )
+    def test_token_con_claims_incompletos_401(self, client, user_factory, claims):
+        user = user_factory()
+        claims = {k: (str(user.id) if v == "SUB" else v) for k, v in claims.items()}
+        token = jwt.encode(claims, "clave-solo-para-pruebas", algorithm="HS256")
+
+        response = client.post(
+            UPLOAD_URL, files=png_file(), headers={"Authorization": f"Bearer {token}"}
+        )
+        assert response.status_code == 401
+
+    def test_token_alg_none_401(self, client, user_factory):
+        user = user_factory()
+        header = base64.urlsafe_b64encode(b'{"alg":"none","typ":"JWT"}').rstrip(b"=")
+        payload = base64.urlsafe_b64encode(
+            f'{{"sub":"{user.id}","exp":9999999999}}'.encode()
+        ).rstrip(b"=")
+        token = f"{header.decode()}.{payload.decode()}."
+
+        response = client.post(
+            UPLOAD_URL, files=png_file(), headers={"Authorization": f"Bearer {token}"}
         )
         assert response.status_code == 401
 
