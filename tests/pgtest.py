@@ -34,6 +34,8 @@ os.environ["SECRET_KEY"] = "clave-solo-para-pruebas"
 os.environ["SUPABASE_URL"] = "http://localhost:54321"
 os.environ["SUPABASE_KEY"] = "clave-falsa"
 os.environ["SUPABASE_BUCKET"] = "bucket-de-prueba"
+# Las pruebas usan un predictor doble; nunca descargan ni cargan el modelo real al arrancar
+os.environ["MODEL_LOAD_ON_STARTUP"] = "0"
 
 ALEMBIC_INI = Path(__file__).resolve().parents[1] / "backend" / "alembic.ini"
 

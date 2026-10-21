@@ -7,7 +7,7 @@ from backend.app.main import app
 def test_health_ok(client):
     response = client.get("/api/v1/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "database": "connected"}
+    assert response.json() == {"status": "ok", "database": "connected", "model": "loaded"}
 
 
 def test_health_sin_base_503_sin_detalles(client):

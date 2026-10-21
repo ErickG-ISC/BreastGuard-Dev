@@ -22,6 +22,11 @@ from backend.app.api.deps import get_storage  # noqa: E402
 from backend.app.api.rate_limit import limiter  # noqa: E402
 from backend.app.db import get_engine  # noqa: E402
 from backend.app.main import app  # noqa: E402
+from backend.app.ml.config import ModelCard  # noqa: E402
+from backend.app.ml.deps import get_inference  # noqa: E402
+from backend.app.ml.runtime import FakePredictor  # noqa: E402
+from backend.app.ml.service import InferenceService  # noqa: E402
+from backend.app.ml.settings import MLSettings  # noqa: E402
 from backend.app.services.storage import StorageError  # noqa: E402
 from tests.helpers import TestUser, insert_tenant, insert_user  # noqa: E402
 
@@ -114,9 +119,34 @@ def storage() -> FakeStorage:
     return FakeStorage()
 
 
+DEMO_CARD = {
+    "model_version": "fake-3c-1",
+    "is_demo": True,
+    "classes": ["normal", "benigno", "maligno"],
+    "input_size": [224, 224],
+    "color_mode": "rgb",
+    "preprocessing": "raw_0_255",
+    "files": {},
+}
+
+
 @pytest.fixture
-def client(owner_engine, storage: FakeStorage):
+def predictor() -> FakePredictor:
+    """Predictor doble; cada prueba puede fijar `predictor.probabilities`."""
+    return FakePredictor(
+        ModelCard.from_dict(DEMO_CARD), {"normal": 0.9, "benigno": 0.07, "maligno": 0.03}
+    )
+
+
+@pytest.fixture
+def inference(predictor) -> InferenceService:
+    return InferenceService(predictor, MLSettings())
+
+
+@pytest.fixture
+def client(owner_engine, storage: FakeStorage, inference: InferenceService):
     app.dependency_overrides[get_storage] = lambda: storage
+    app.dependency_overrides[get_inference] = lambda: inference
     # IP de documentación (RFC 5737) para que la auditoría registre una IP válida
     with TestClient(app, client=("198.51.100.7", 50000)) as test_client:
         yield test_client
