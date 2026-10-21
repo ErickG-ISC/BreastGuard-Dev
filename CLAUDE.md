@@ -70,7 +70,7 @@ npm run preview
 
 Todos los secretos vienen de variables de entorno. Ver `.env.example` (raíz) y `frontend/.env.example`. `main.py` llama `load_dotenv()` antes de importar el resto.
 
-Variables existentes: `DATABASE_URL`, `SECRET_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`, `SUPABASE_BUCKET`, `FRONTEND_ORIGIN`, `MODEL_PATH`, `MAX_UPLOAD_MB` (opcional, 10 por defecto), y `VITE_API_URL` en el frontend.
+Variables existentes: `DATABASE_URL`, `SECRET_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`, `SUPABASE_BUCKET`, `FRONTEND_ORIGIN`, `MODEL_BUCKET`, `MODEL_PREFIX`, `MODEL_DIR`, `MAX_CONCURRENT_INFERENCES`, `MAX_UPLOAD_MB` (opcional, 10 por defecto), y `VITE_API_URL` en el frontend.
 
 Variables de la multitenencia (ADR 0003):
 - `DATABASE_URL` — rol **dueño/migrador**; solo lo usan Alembic y los scripts de mantenimiento. La app toma de aquí solo host, puerto, base y sufijo del usuario (`postgres.<ref>` → `app_user.<ref>`), así que en Render puede ir sin la contraseña del dueño.
@@ -106,7 +106,6 @@ Reglas de infraestructura:
 - `/health` solo hace `SELECT 1` con `get_control_db` (503 genérico si falla). El esquema lo crea **Alembic** (`backend/migrations/`, helpers RLS en `backend/migrations/rls.py`); nunca `create_all`.
 - `services/auth.py`: hash bcrypt, JWT, `register_patient`, `authenticate_user` y `load_auth_context`.
 - `services/images.py`: valida la subida (extensión y MIME JPG/PNG, tamaño `MAX_UPLOAD_MB`, que abra con Pillow) y sube a `{tenant_slug}/images/{uuid}.{ext}` con un temporal uuid que se borra en `finally`. La fila guarda `object_path`, no una URL. DICOM se rechaza hasta CU-09.
-- `services/ml_model.py`: `BreastCancerModel` envuelve un modelo **Keras/TensorFlow** (`.h5`, ruta en `MODEL_PATH`, por defecto `models/breast_cancer_model.h5`). El `.h5` no está en el repo y **ningún router lo invoca aún**.
 - `services/storage.py`: bucket **privado** de Supabase Storage (cliente creado al primer uso): `upload_file`, `create_signed_url` (TTL `SIGNED_URL_TTL_SECONDS`, 300 s por defecto) y `remove_prefix` (purga). Nunca URLs públicas. Los fallos se registran solo por tipo (`StorageError`, 502). No se usa AWS/S3.
 - `services/audit.py`: `record(...)` inserta en `clinical.audit_log` con Core y sin RETURNING, en la misma transacción que la acción. `list_entries(...)` sirve a `GET /audit`.
 - `services/tenants.py` + `api/v1/admin.py` (solo `platform_admin`, solo `control`):
@@ -170,14 +169,21 @@ Reglas que nunca se rompen:
 
 ## Modelo de IA
 
-Estado: EfficientNet-B0 en **Keras/TensorFlow** (`.h5`) entrenado con BUSI. Hay planes de reentrenar con un dataset más completo; limitar esa tarea a 3-4 días en la semana 5 y, si no mejora, conservar el modelo actual.
+Estado: **modelo de demostración** (EfficientNet-B0 sin entrenar, 3 clases, `is_demo: true`); el modelo real con BUSI aún no existe. Reentrenar o entrenar se hace FUERA de este repo; limitarlo a 3-4 días en la semana 5. Ver ADR 0006.
 
-- Cargar el modelo **una sola vez** al iniciar la app (lifespan de FastAPI), nunca por petición.
-- Usar `tensorflow-cpu`. Si Render se queda sin RAM, convertir a TFLite u ONNX (`tf2onnx`) o mover la inferencia a otro servicio; decidir midiendo, no suponiendo.
-- Heatmap con Grad-CAM (`tf.GradientTape` sobre la última capa convolucional). Mantenerlo detrás de una función `generate_heatmap(image, model)` fácil de reemplazar.
-- Salida del servicio: clase (`normal|benigno|maligno`), confianza, heatmap superpuesto. Dos "perfiles" de reporte: **sencillo** (paciente, B2C) y **técnico con terminología BI-RADS** (médico, B2B).
-- **DICOM (B2B)**: leer con `pydicom`, convertir a imagen normalizada y pasarla por el modelo. BUSI son ecografías: un modelo entrenado en ellas **no es válido para mastografías**. Mostrar siempre en pantalla que es un prototipo; un modelo real de mastografía requeriría otro dataset (CBIS-DDSM, INbreast, VinDr-Mammo) y queda como trabajo futuro.
-- Reportar métricas honestas (matriz de confusión, sensibilidad en maligno). Dividir train/test sin fuga de datos entre imágenes del mismo paciente/serie.
+- **Producción sin TensorFlow.** La inferencia corre con **LiteRT** (`ai-edge-litert`): pico de 184 MB de RSS con la app completa, frente a ~443 MB de TensorFlow solo, medido en Docker con 512 MB. TensorFlow está solo en `requirements-ml.txt`, para `backend/ml_tools/` (`build_demo_model`, `measure_memory`, `upload_model`).
+- **`model_card.json`** es la única fuente de clases (2 o 3, con alias benign/malignant), tamaño de entrada, preprocesamiento (`raw_0_255` para el EfficientNet de Keras, que normaliza **dentro**), `model_version` y sha256 de cada archivo.
+- **Carga:** el modelo se carga **una sola vez** en el lifespan, desde `MODEL_DIR` o descargado del bucket privado `MODEL_BUCKET/MODEL_PREFIX`. Si falla, `/health` muestra `model: unavailable` y el análisis responde 503.
+- **`backend/app/ml/`:**
+  - `runtime.py`: `LiteRTPredictor` y `FakePredictor` para pruebas;
+  - `heatmap.py`: `generate_heatmap(image, model)`. Para GAP → Dense, el CAM en numpy equivale exactamente a Grad-CAM; una prueba lenta lo compara con TensorFlow;
+  - `quality.py`: rechaza imágenes chicas, a color o uniformes, y marca baja confianza o alta incertidumbre como `inconclusive`;
+  - `report.py`: plantillas, sin LLM;
+  - `settings.py`: **todos** los umbrales;
+  - `service.py`: threadpool, semáforo `MAX_CONCURRENT_INFERENCES` y descarte del EXIF.
+- **Salida:** clase (`normal|benigno|maligno`), probabilidades, confianza, `model_version`, heatmap superpuesto y reporte sencillo. El reporte técnico BI-RADS (B2B) llega con el panel médico.
+- **DICOM (B2B):** leer con `pydicom`, convertir a imagen normalizada y pasarla por el modelo. BUSI son ecografías: un modelo entrenado en ellas **no es válido para mastografías**. Mostrar siempre que es un prototipo; un modelo real de mastografía requeriría otro dataset (CBIS-DDSM, INbreast, VinDr-Mammo).
+- Reportar métricas honestas (matriz de confusión, sensibilidad en maligno). Dividir train/test sin fuga de datos entre imágenes del mismo paciente o serie.
 
 ## Seguridad, privacidad y avisos
 

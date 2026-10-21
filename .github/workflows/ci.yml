@@ -47,13 +47,12 @@ jobs:
             requirements.txt
             requirements-dev.txt
 
-      - name: Instalar dependencias (sin TensorFlow)
+      - name: Instalar dependencias
         run: |
-          # tensorflow-cpu no se usa en las pruebas de esta fase y pesa ~500 MB
-          grep -v '^tensorflow' requirements.txt > requirements-ci.txt
-          sed 's/^-r requirements.txt$/-r requirements-ci.txt/' requirements-dev.txt > requirements-dev-ci.txt
+          # requirements.txt ya no lleva TensorFlow (inferencia con LiteRT, ADR 0006).
+          # Las pruebas `slow` con el modelo exportado se omiten en CI.
           python -m pip install --upgrade pip
-          pip install -r requirements-dev-ci.txt
+          pip install -r requirements-dev.txt
 
       - name: Ruff (lint)
         run: ruff check .
