@@ -41,6 +41,20 @@ def test_frontend_origin_tolera_errores_de_captura():
     assert parse_origins("  ") == ["http://localhost:5173"]
 
 
+def test_frontend_origin_un_origen_por_linea():
+    """Caso real de Render: los orígenes quedaron separados por un salto de línea."""
+    from backend.app.cors import parse_origins
+
+    assert parse_origins("https://breastguardfrontend.vercel.app\nhttp://localhost:5173") == [
+        "https://breastguardfrontend.vercel.app",
+        "http://localhost:5173",
+    ]
+    assert parse_origins("https://a.vercel.app https://b.vercel.app\r\n") == [
+        "https://a.vercel.app",
+        "https://b.vercel.app",
+    ]
+
+
 def test_cors_permite_el_origen_configurado(client):
     from backend.app.main import frontend_origins
 

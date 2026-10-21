@@ -5,7 +5,12 @@ pegados en el panel de Render: sin `https://`, con comillas, espacios o barra fi
 normalizan aquí para que no dejen el frontend sin acceso a la API.
 """
 
+import re
+
 DEFAULT_ORIGIN = "http://localhost:5173"
+# Separadores aceptados entre orígenes: comas y cualquier espacio en blanco (saltos de línea
+# incluidos; en el panel de Render es fácil pegar uno por línea). Un origen nunca tiene espacios.
+_SEPARATORS = re.compile(r"[,\s]+")
 
 
 def normalize_origin(value: str) -> str | None:
@@ -21,7 +26,7 @@ def normalize_origin(value: str) -> str | None:
 
 def parse_origins(raw: str | None) -> list[str]:
     origins = []
-    for part in (raw or DEFAULT_ORIGIN).split(","):
+    for part in _SEPARATORS.split(raw or DEFAULT_ORIGIN):
         origin = normalize_origin(part)
         if origin and origin not in origins:
             origins.append(origin)
