@@ -6,6 +6,7 @@ Se consulta el catálogo de Postgres como dueño (solo lectura de metadatos).
 import pytest
 from sqlalchemy import text
 
+from tests.isolation.catalogo import CLINICAL_TABLES_SQL, rls_problems
 from tests.pgtest import TEST_APP_ROLE
 
 pytestmark = pytest.mark.usefixtures("database")
@@ -17,27 +18,9 @@ def rows(owner_engine, sql: str, **params):
 
 
 def test_toda_tabla_clinica_tiene_tenant_id_rls_forzado_y_politica(owner_engine):
-    tables = rows(
-        owner_engine,
-        """
-        SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity,
-               EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = c.oid
-                       AND a.attname = 'tenant_id' AND a.attnotnull) AS has_tenant_id,
-               (SELECT count(*) FROM pg_policy p WHERE p.polrelid = c.oid) AS policies,
-               EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid = c.oid
-                       AND p.polname = 'tenant_isolation' AND p.polpermissive
-                       AND p.polqual IS NOT NULL AND p.polwithcheck IS NOT NULL) AS tenant_policy
-        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname = 'clinical' AND c.relkind IN ('r', 'p')
-        """,
-    )
+    tables = rows(owner_engine, CLINICAL_TABLES_SQL)
     assert {t.relname for t in tables} >= {"patients", "medical_images", "audit_log"}
-    for t in tables:
-        assert t.has_tenant_id, f"clinical.{t.relname} sin tenant_id NOT NULL"
-        assert t.relrowsecurity, f"clinical.{t.relname} sin RLS habilitado"
-        assert t.relforcerowsecurity, f"clinical.{t.relname} sin RLS forzado"
-        assert t.policies >= 1, f"clinical.{t.relname} sin políticas"
-        assert t.tenant_policy, f"clinical.{t.relname} sin tenant_isolation con USING y WITH CHECK"
+    assert rls_problems(tables) == []
 
 
 def test_pk_de_tablas_clinicas_empieza_por_tenant_id(owner_engine):
