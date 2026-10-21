@@ -10,7 +10,7 @@ class MedicalImage(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
-    image_path = Column(String)  # URL en S3
+    image_path = Column(String)  # URL de Supabase Storage (pendiente: URLs firmadas)
     image_type = Column(String)  # BUSI o mammography
     prediction = Column(String, nullable=True)  # benign, malignant, etc.
     confidence = Column(Float, nullable=True)

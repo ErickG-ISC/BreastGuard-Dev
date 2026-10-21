@@ -1,49 +1,22 @@
-import os
-import uuid
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, File, Form, UploadFile, status
 
-from backend.app.models.database import SessionLocal
-from backend.app.models.image import MedicalImage
-from backend.app.services.storage import upload_file_to_storage
+from backend.app.api.deps import CurrentUser, DbSession, Storage
+from backend.app.schemas.image import ImageUploadOut
+from backend.app.services.images import read_and_validate_image, store_medical_image
 
 router = APIRouter()
 
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-@router.post("/upload")
+@router.post("/upload", response_model=ImageUploadOut, status_code=status.HTTP_201_CREATED)
 async def upload_image(
-    file: UploadFile = File(...),
-    user_id: int = 1,  # En producción, usa el ID del usuario autenticado
-    image_type: str = "BUSI",  # "BUSI" o "mammography"
-    db: Session = Depends(get_db),
+    file: Annotated[UploadFile, File()],
+    current_user: CurrentUser,
+    db: DbSession,
+    storage: Storage,
+    image_type: Annotated[Literal["BUSI", "mammography"], Form()] = "BUSI",
 ):
-    # Guardar archivo temporalmente
-    file_path = f"temp/{uuid.uuid4()}{file.filename}"
-    with open(file_path, "wb") as buffer:
-        buffer.write(await file.read())
-
-    # Subir a Supabase Storage
-    object_name = f"uploads/{user_id}/{uuid.uuid4()}{file.filename}"
-    image_url = upload_file_to_storage(file_path, object_name)
-    if not image_url:
-        raise HTTPException(status_code=500, detail="Failed to upload image to storage")
-
-    # Guardar en DB
-    db_image = MedicalImage(user_id=user_id, image_path=image_url, image_type=image_type)
-    db.add(db_image)
-    db.commit()
-    db.refresh(db_image)
-
-    # Eliminar archivo temporal
-    os.remove(file_path)
-
-    return {"message": "Image uploaded successfully", "image_id": db_image.id}
+    image = await read_and_validate_image(file)
+    db_image = store_medical_image(db, storage, current_user, image, image_type)
+    return ImageUploadOut(message="Imagen subida correctamente", image_id=db_image.id)
