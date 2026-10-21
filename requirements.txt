@@ -12,6 +12,7 @@ passlib==1.7.4
 bcrypt==4.0.1
 supabase==2.33.0
 python-dotenv==1.2.4
-tensorflow-cpu==2.21.0 # Para el plan gratuito de Render
+# Inferencia en producción con LiteRT (sin TensorFlow): cabe en Render gratuito (ADR 0006)
+ai-edge-litert==2.3.0
 numpy==2.5.4
 pillow==13.0.0
