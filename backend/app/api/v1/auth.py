@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 
 from backend.app.api.deps import ControlDb, CurrentUser
+from backend.app.api.rate_limit import rate_limit
 from backend.app.schemas.auth import MeOut, Token, UserCreate, UserOut
 from backend.app.services.auth import (
     EmailAlreadyRegisteredError,
@@ -17,7 +18,12 @@ from backend.app.services.auth import (
 router = APIRouter()
 
 
-@router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/register",
+    response_model=UserOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit("auth_register", 5, 60))],
+)
 def register(data: UserCreate, db: ControlDb):
     """Registro público: siempre crea una paciente en el tenant B2C."""
     try:
@@ -31,7 +37,11 @@ def register(data: UserCreate, db: ControlDb):
         ) from None
 
 
-@router.post("/token", response_model=Token)
+@router.post(
+    "/token",
+    response_model=Token,
+    dependencies=[Depends(rate_limit("auth_token", 10, 60))],
+)
 def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()], db: ControlDb):
     try:
         user = authenticate_user(db, form_data.username, form_data.password)

@@ -6,8 +6,9 @@ auditoría falla, la acción también. Se inserta con Core y sin RETURNING (ver 
 
 import ipaddress
 import uuid
+from datetime import datetime
 
-from sqlalchemy import insert
+from sqlalchemy import insert, select
 from sqlalchemy.orm import Session
 
 from backend.app.models.clinical import AuditLog
@@ -46,3 +47,23 @@ def record(
             ip=_clean_ip(ip),
         )
     )
+
+
+def list_entries(
+    db: Session,
+    *,
+    since: datetime | None,
+    until: datetime | None,
+    actor_id: uuid.UUID | None,
+    limit: int,
+    offset: int,
+) -> list[AuditLog]:
+    """Lectura para tenant_admin: RLS ya limita al tenant del JWT y la política exige el rol."""
+    query = select(AuditLog).order_by(AuditLog.occurred_at.desc(), AuditLog.id)
+    if since is not None:
+        query = query.where(AuditLog.occurred_at >= since)
+    if until is not None:
+        query = query.where(AuditLog.occurred_at <= until)
+    if actor_id is not None:
+        query = query.where(AuditLog.actor_id == actor_id)
+    return list(db.scalars(query.limit(limit).offset(offset)))

@@ -1,4 +1,5 @@
 import io
+import logging
 import os
 import tempfile
 import uuid
@@ -11,8 +12,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.app.models.clinical import MedicalImage, Patient
+from backend.app.services import audit
 from backend.app.services.auth import AuthContext
-from backend.app.services.storage import StorageError, SupabaseStorage
+from backend.app.services.storage import StorageError, SupabaseStorage, signed_url_ttl
+
+logger = logging.getLogger(__name__)
 
 # Extensiones aceptadas -> MIME esperado. DICOM llega con CU-09 (requiere pydicom).
 ALLOWED_EXTENSIONS = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png"}
@@ -79,6 +83,7 @@ def store_medical_image(
     auth: AuthContext,
     image: ValidatedImage,
     image_type: str,
+    ip: str | None,
 ) -> MedicalImage:
     """Sube la imagen al prefijo del tenant y registra la fila; el temporal se borra siempre.
 
@@ -112,7 +117,56 @@ def store_medical_image(
             image_type=image_type,
         )
         db.add(db_image)
+        db.flush()
+        _audit(db, auth, "image.upload", image_id, ip)
         db.commit()
         return db_image
     finally:
         temp_path.unlink(missing_ok=True)
+
+
+def _audit(
+    db: Session, auth: AuthContext, action: str, resource_id: uuid.UUID | None, ip: str | None
+) -> None:
+    audit.record(
+        db,
+        tenant_id=auth.tenant_id,
+        actor_id=auth.user_id,
+        actor_role=auth.role,
+        action=action,
+        resource_type="medical_image",
+        resource_id=resource_id,
+        ip=ip,
+    )
+
+
+def list_images(db: Session, auth: AuthContext, ip: str | None) -> list[MedicalImage]:
+    """RLS limita al tenant; la política por rol limita a la paciente sus propias imágenes."""
+    images = list(db.scalars(select(MedicalImage).order_by(MedicalImage.created_at.desc())))
+    _audit(db, auth, "image.list", None, ip)
+    db.commit()
+    return images
+
+
+def get_image_with_url(
+    db: Session, storage: SupabaseStorage, auth: AuthContext, image_id: uuid.UUID, ip: str | None
+) -> tuple[MedicalImage, str, int]:
+    """Imagen visible por RLS + URL firmada. Ajena o inexistente responden igual (404)."""
+    not_found = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Imagen no encontrada")
+    image = db.scalars(select(MedicalImage).where(MedicalImage.id == image_id)).first()
+    if image is None:
+        raise not_found
+    # Defensa en profundidad: nunca firmar una ruta fuera del prefijo del tenant
+    if not image.object_path.startswith(f"{auth.tenant_slug}/"):
+        logger.error("Imagen con ruta fuera del prefijo de su tenant (id=%s)", image.id)
+        raise not_found
+    ttl = signed_url_ttl()
+    try:
+        url = storage.create_signed_url(image.object_path, ttl)
+    except StorageError:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail="No se pudo generar el enlace"
+        ) from None
+    _audit(db, auth, "image.read", image.id, ip)
+    db.commit()
+    return image, url, ttl
