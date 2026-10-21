@@ -103,11 +103,28 @@ Reglas de infraestructura:
 - `services/auth.py`: hash bcrypt, JWT, `register_patient`, `authenticate_user` y `load_auth_context`.
 - `services/images.py`: valida la subida (extensión y MIME JPG/PNG, tamaño `MAX_UPLOAD_MB`, que abra con Pillow) y sube a `{tenant_slug}/images/{uuid}.{ext}` con un temporal uuid que se borra en `finally`. La fila guarda `object_path`, no una URL. DICOM se rechaza hasta CU-09.
 - `services/ml_model.py`: `BreastCancerModel` envuelve un modelo **Keras/TensorFlow** (`.h5`, ruta en `MODEL_PATH`, por defecto `models/breast_cancer_model.h5`). El `.h5` no está en el repo y **ningún router lo invoca aún**.
-- `services/storage.py`: `SupabaseStorage.upload_file` sube al bucket de Supabase Storage (cliente creado al primer uso). Los fallos se registran solo por tipo y se lanzan como `StorageError` (502). No se usa AWS/S3.
+- `services/storage.py`: bucket **privado** de Supabase Storage (cliente creado al primer uso): `upload_file`, `create_signed_url` (TTL `SIGNED_URL_TTL_SECONDS`, 300 s por defecto) y `remove_prefix` (purga). Nunca URLs públicas. Los fallos se registran solo por tipo (`StorageError`, 502). No se usa AWS/S3.
+- `services/audit.py`: `record(...)` inserta en `clinical.audit_log` con Core y sin RETURNING, en la misma transacción que la acción. `list_entries(...)` sirve a `GET /audit`.
+- `services/tenants.py` + `api/v1/admin.py` (solo `platform_admin`, solo `control`):
+  - alta atómica de tenant + primer `tenant_admin` + auditoría;
+  - alta de `tenant_admin`/`doctor` (nunca en `b2c`);
+  - activación y desactivación;
+  - `isolation-check` (READ ONLY, solo conteos).
+- `api/v1/images.py`: `POST /upload` (paciente), `GET /images` y `GET /images/{id}` (con URL firmada; ajena o inexistente da el mismo 404). Lecturas y subidas auditadas.
+- `api/v1/audit.py`: `GET /audit` para `tenant_admin` con filtros `from`, `to`, `actor_id`, `limit` y `offset`.
+- `api/rate_limit.py`: límites por IP y ruta: `/auth/token` 10/min, `/auth/register` 5/min, `/images/upload` 20/min. En Render, uvicorn debe correr con `--proxy-headers` para registrar la IP real.
+- `backend/scripts/`:
+  - `create_platform_admin.py`: como `app_user`, pide la contraseña;
+  - `purge_tenant.py`: rol dueño con BYPASSRLS, confirma escribiendo el slug, tiene `--dry-run`;
+  - `check_storage.py`: verifica que el bucket sea privado.
 
 ### Frontend (`frontend/src`)
 
-SPA estándar: `main.jsx` monta `App.jsx`, que define rutas con `react-router-dom` (hoy solo `/` → `pages/Home.jsx`). UI con MUI (`@mui/material`, `@emotion/*`) y `axios`. Lint con `oxlint`.
+SPA estándar: `main.jsx` monta `App.jsx` (tema MUI, `AuthProvider` y rutas con `react-router-dom`). UI con MUI (`@mui/material`, `@emotion/*`) y `axios`. Lint con `oxlint`.
+- `api/client.js`: axios con el Bearer del JWT, guardado en `sessionStorage`; un 401 cierra la sesión.
+- `auth/AuthContext.jsx`: login (`/auth/token`) y el usuario actual (`/auth/me`).
+- `components/ProtectedRoute.jsx` (por rol) y `components/Layout.jsx`, con el aviso de herramienta de apoyo.
+- Rutas: `/`, `/login` y `/admin/tenants` (`platform_admin`: crear institución, activar/desactivar y chequeo de aislamiento).
 
 ### Brechas conocidas (resolver en este orden)
 
@@ -115,11 +132,13 @@ Resueltas en la Fase 0: usuario de `/images/upload` tomado del JWT (antes `user_
 
 Resueltas en la Semana 1 (rama `semana1-modelo`): roles asignados (sin `is_medical`), prefijo `{tenant_slug}/` en Storage y `object_path` en lugar de URL.
 
+También en la Semana 1: bucket privado con URLs firmadas, límite de peticiones, auditoría de accesos (CU-13) y alta de tenants con chequeo de aislamiento (CU-12).
+
 Pendientes:
-1. Bucket privado y URLs firmadas de corta duración (Semana 1, rama de auditoría y Storage).
-2. Sin rate limit en `/auth/token`, `/auth/register` ni `/images/upload` (Semana 1, misma rama).
-3. El modelo no está conectado al flujo de subida y es binario (benigno/maligno); CU-02 pide también "normal" (BUSI tiene las tres clases).
-4. Si falla el commit después de subir a Storage, queda un objeto huérfano.
+1. El modelo no está conectado al flujo de subida y es binario (benigno/maligno); CU-02 pide también "normal" (BUSI tiene las tres clases).
+2. Si falla el commit después de subir a Storage, queda un objeto huérfano.
+3. El límite de peticiones es en memoria (una sola instancia); con varias instancias haría falta un almacén compartido.
+4. `legacy.users` conserva emails y hashes del prototipo; borrar el esquema `legacy` cuando ya no haga falta.
 
 ## Arquitectura objetivo: multitenencia con RLS (REGLAS INNEGOCIABLES)
 
