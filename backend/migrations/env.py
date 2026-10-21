@@ -7,7 +7,7 @@ from sqlalchemy import create_engine, pool
 
 load_dotenv()
 
-from backend.app.models import image, user  # noqa: E402, F401  (registra las tablas)
+from backend.app.models import clinical, control  # noqa: E402, F401  (registra las tablas)
 from backend.app.models.base import Base  # noqa: E402
 
 config = context.config
@@ -16,6 +16,15 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
+
+# Esquemas de la app: el autogenerate y la comparación con los modelos solo miran estos
+APP_SCHEMAS = {"control", "clinical"}
+
+
+def include_name(name, type_, parent_names) -> bool:
+    if type_ == "schema":
+        return name in APP_SCHEMAS
+    return True
 
 
 def get_url() -> str:
@@ -44,7 +53,12 @@ def run_migrations_offline() -> None:
 def run_migrations_online() -> None:
     connectable = create_engine(get_url(), poolclass=pool.NullPool)
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            include_schemas=True,
+            include_name=include_name,
+        )
         with context.begin_transaction():
             context.run_migrations()
 
