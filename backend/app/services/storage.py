@@ -49,6 +49,21 @@ class SupabaseStorage:
             logger.error("Fallo al subir un objeto a Storage (%s)", type(exc).__name__)
             raise StorageError from exc
 
+    def upload_bytes(self, object_name: str, data: bytes, content_type: str) -> None:
+        try:
+            self._bucket().upload(object_name, data, {"content-type": content_type})
+        except Exception as exc:
+            logger.error("Fallo al subir un objeto a Storage (%s)", type(exc).__name__)
+            raise StorageError from exc
+
+    def remove_objects(self, object_names: list[str]) -> None:
+        """Borra objetos concretos (eliminación de un análisis)."""
+        try:
+            self._bucket().remove(object_names)
+        except Exception as exc:
+            logger.error("Fallo al borrar objetos de Storage (%s)", type(exc).__name__)
+            raise StorageError from exc
+
     def create_signed_url(self, object_name: str, expires_in: int) -> str:
         try:
             result = self._bucket().create_signed_url(object_name, expires_in)

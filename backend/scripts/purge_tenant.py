@@ -19,7 +19,13 @@ from sqlalchemy.engine import make_url
 
 # Orden de borrado (hijas antes que padres). Si aparece una tabla clínica nueva, la purga se
 # detiene hasta que se agregue aquí: así nunca deja filas huérfanas de un tenant.
-CLINICAL_DELETE_ORDER = ("audit_log", "questionnaires", "medical_images", "patients")
+CLINICAL_DELETE_ORDER = (
+    "audit_log",
+    "questionnaires",
+    "analyses",
+    "medical_images",
+    "patients",
+)
 
 
 class PurgeError(Exception):

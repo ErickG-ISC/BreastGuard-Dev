@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.app.api.v1 import admin, audit, auth, health, images, onboarding
+from backend.app.api.v1 import admin, analyses, audit, auth, health, images, onboarding
 from backend.app.db import assert_safe_db_role
 from backend.app.ml.loader import load_predictor
 from backend.app.ml.service import InferenceService
@@ -54,6 +54,7 @@ app.include_router(images.router, prefix="/api/v1/images")
 app.include_router(admin.router, prefix="/api/v1/admin")
 app.include_router(audit.router, prefix="/api/v1/audit")
 app.include_router(onboarding.router, prefix="/api/v1")
+app.include_router(analyses.router, prefix="/api/v1/analyses")
 
 
 @app.get("/")
