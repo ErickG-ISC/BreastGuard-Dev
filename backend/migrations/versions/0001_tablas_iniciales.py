@@ -67,6 +67,13 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     tables = _existing_tables()
+    # Borrar estas tablas elimina datos de pacientes: solo se permite si están vacías
+    bind = op.get_bind()
+    for table in ("medical_images", "users"):
+        if table in tables and bind.execute(sa.text(f"SELECT 1 FROM {table} LIMIT 1")).first():
+            raise RuntimeError(
+                f"La tabla {table} tiene datos; el downgrade de 0001 solo se permite sin datos."
+            )
     if "medical_images" in tables:
         op.drop_table("medical_images")
     if "users" in tables:

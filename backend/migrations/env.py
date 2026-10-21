@@ -8,7 +8,7 @@ from sqlalchemy import create_engine, pool
 load_dotenv()
 
 from backend.app.models import image, user  # noqa: E402, F401  (registra las tablas)
-from backend.app.models.database import Base  # noqa: E402
+from backend.app.models.base import Base  # noqa: E402
 
 config = context.config
 

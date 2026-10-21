@@ -15,7 +15,7 @@ from sqlalchemy.pool import StaticPool  # noqa: E402
 
 from backend.app.api.deps import get_db, get_storage  # noqa: E402
 from backend.app.main import app  # noqa: E402
-from backend.app.models.database import Base  # noqa: E402
+from backend.app.models.base import Base  # noqa: E402
 from backend.app.models.user import User  # noqa: E402
 from backend.app.services.auth import get_password_hash  # noqa: E402
 from backend.app.services.storage import StorageError  # noqa: E402

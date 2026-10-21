@@ -5,9 +5,9 @@ from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, text
 
-from backend.app.models.database import Base
+from backend.app.models.base import Base
 
 ALEMBIC_INI = Path(__file__).resolve().parents[1] / "backend" / "alembic.ini"
 APP_TABLES = {"users", "medical_images"}
@@ -67,4 +67,23 @@ def test_idempotente_sobre_base_creada_con_create_all(db_url):
     command.upgrade(config, "head")
     command.upgrade(config, "head")
 
+    assert table_names(db_url) == APP_TABLES
+
+
+def test_downgrade_no_borra_tablas_con_datos(db_url):
+    config = alembic_config(db_url)
+    command.upgrade(config, "head")
+    engine = create_engine(db_url)
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO users (email) VALUES ('a@example.com')"))
+    engine.dispose()
+
+    with pytest.raises(RuntimeError, match="tiene datos"):
+        command.downgrade(config, "base")
+    assert table_names(db_url) == APP_TABLES
+
+
+def test_env_no_requiere_database_url_si_recibe_dburl(db_url, monkeypatch):
+    monkeypatch.delenv("DATABASE_URL")
+    command.upgrade(alembic_config(db_url), "head")
     assert table_names(db_url) == APP_TABLES

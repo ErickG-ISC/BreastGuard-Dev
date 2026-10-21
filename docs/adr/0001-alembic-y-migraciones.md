@@ -15,4 +15,6 @@
 ## Consecuencias
 - Cambiar un modelo exige una revisión nueva; la prueba de `compare_metadata` falla si se olvida.
 - Las pruebas de API usan SQLite en memoria con `create_all` solo como atajo de velocidad; las migraciones se prueban aparte.
+- El `downgrade` de `0001` se niega a borrar tablas con datos.
+- Para `migrate_all_tenants`, la URL de cada tenant debe pasarse solo por `config.attributes["dburl"]` (no `-x`, que queda en la lista de procesos) y `env.py` debe fallar si falta, en lugar de caer a `DATABASE_URL`. Los errores se registran solo con el `slug`.
 - Pendiente para la Semana 1: `get_db` no puede convertirse tal cual en `get_tenant_db`, porque login y registro no tienen JWT. Hará falta `get_control_db` (identidad, tenants) separado de `get_tenant_db` (datos de negocio), y quitar `engine`/`SessionLocal` globales de `models/database.py`.
