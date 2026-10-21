@@ -52,7 +52,7 @@ ruff check . && ruff format .  # lint y formato (configuración en pyproject.tom
 alembic -c backend/alembic.ini upgrade head   # migra la base de DATABASE_URL (o -x dburl=...)
 ```
 
-Desde la Semana 1: `python -m backend.scripts.migrate_all_tenants` migra todas las bases de tenant (todavía no existe).
+Las migraciones en producción se corren **a mano desde una computadora de desarrollo**, nunca en el build de Render.
 
 ### Frontend (`cd frontend` primero)
 
@@ -70,13 +70,15 @@ Todos los secretos vienen de variables de entorno. Ver `.env.example` (raíz) y 
 
 Variables existentes: `DATABASE_URL`, `SECRET_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`, `SUPABASE_BUCKET`, `FRONTEND_ORIGIN`, `MODEL_PATH`, `MAX_UPLOAD_MB` (opcional, 10 por defecto), y `VITE_API_URL` en el frontend.
 
-Variables nuevas que introduce la multitenencia (agregarlas a `.env.example` sin valores reales):
-- `CONTROL_DATABASE_URL` — base de control (reemplaza el rol actual de `DATABASE_URL`).
-- `TENANT_DSN_KEY` — llave Fernet para cifrar las cadenas de conexión de cada tenant en la tabla `tenants`.
+Variables de la multitenencia (ADR 0003):
+- `DATABASE_URL` — rol **dueño/migrador**; solo lo usan Alembic y los scripts de mantenimiento. La app toma de aquí solo host, puerto, base y sufijo del usuario (`postgres.<ref>` → `app_user.<ref>`), así que en Render puede ir sin la contraseña del dueño.
+- `APP_DB_PASSWORD` — contraseña de `app_user`; la migración crea el rol con ella y la app se conecta con ella.
+- `APP_DB_USER` — opcional, nombre del rol de la app (`app_user` por defecto).
+- `APP_DATABASE_URL` — opcional, URL completa de `app_user` que sustituye a la derivada (la usan las pruebas).
 
 Reglas de infraestructura:
 - `.python-version` fija Python 3.12 (TensorFlow y SQLAlchemy van detrás de las últimas versiones de CPython). No subirlo a 3.13/3.14.
-- Para Supabase usar siempre la cadena del **Session pooler**, no "Direct connection" (solo resuelve por IPv6 y falla en Render con `Network is unreachable`).
+- Para Supabase usar siempre el **pooler** (Session pooler para migraciones; la app también funciona en modo transacción porque el contexto es por transacción), no "Direct connection" (solo resuelve por IPv6 y falla en Render con `Network is unreachable`).
 - Render en plan gratuito se duerme y tiene ~512 MB de RAM: ver sección del modelo de IA.
 - Nunca commitear `.env`, llaves ni datos médicos reales.
 
@@ -113,27 +115,29 @@ Pendientes:
 5. Si falla el commit después de subir a Storage, queda un objeto huérfano.
 6. La ruta `uploads/{user_id}/...` es provisional: en la Semana 1 pasa a `{tenant_slug}/...` con el slug resuelto en el servidor.
 
-## Arquitectura objetivo: multitenencia (REGLAS INNEGOCIABLES)
+## Arquitectura objetivo: multitenencia con RLS (REGLAS INNEGOCIABLES)
 
-Modelo: **una base de datos física por tenant**, más una base de control.
+Modelo: **una sola base Postgres (Supabase) con Row Level Security forzado** (ADR 0002, que reemplaza el modelo de una base por tenant). Identidad y roles en el ADR 0003.
 
-- **Base de control**: tabla `tenants` (id, slug, nombre, tipo `b2c|institucion`, `dsn_cifrado`, plan, activo) y datos de identidad global (usuarios con `tenant_id` y rol). Autenticación y JWT viven aquí.
-- **Bases de tenant** (2 o 3 para la demo): una compartida para pacientes B2C y una por clínica. Alojadas en Supabase (si el plan gratuito lo permite) o Azure Database for PostgreSQL Flexible Server (cuenta de estudiante). Row Level Security es **último recurso**, no la estrategia principal.
-- **Roles**: `patient`, `doctor`, `tenant_admin`, `platform_admin`. El JWT incluye `sub`, `tenant_id` y `role`.
-- **Resolución de tenant**: una dependencia de FastAPI lee `tenant_id` del JWT, busca el tenant en la base de control, descifra su DSN y entrega una `Session` de SQLAlchemy del engine correcto (engines cacheados por tenant con tamaño de pool pequeño; los pools son limitados en el plan gratuito).
+- **Esquema `control`**: `tenants` (id uuid, slug, nombre, tipo `b2c|institucion`, plan, activo) y `users` (id uuid, `tenant_id`, `role`, activo). Sin RLS; solo identidad y administración, nunca datos clínicos.
+- **Esquema `clinical`**: todo dato clínico (`patients`, `medical_images`, `audit_log` y futuras tablas). Cada tabla lleva `tenant_id uuid NOT NULL DEFAULT clinical.current_tenant_id()`, PK `(tenant_id, id)`, RLS **habilitado y forzado** y la política `tenant_isolation` (`USING` + `WITH CHECK` sobre `tenant_id = (SELECT clinical.current_tenant_id())`). Sin contexto se ven 0 filas y los `INSERT` fallan.
+- **Roles de base**: el dueño/migrador (`DATABASE_URL`) solo para Alembic y scripts; la app corre **siempre** como `app_user` (`NOSUPERUSER NOBYPASSRLS`, sin DDL; en `audit_log` solo `SELECT, INSERT`). La app no arranca si su rol es superusuario o BYPASSRLS (el `postgres` de Supabase lo es).
+- **Roles de aplicación**: `patient`, `doctor`, `tenant_admin`, `platform_admin`. El JWT incluye `sub`, `tenant_id` y `role`. El registro público solo crea `patient` en el tenant `b2c`. El `platform_admin` es **control-only**: no tiene tenant ni acceso a datos clínicos.
+- **Resolución de tenant**: un solo engine de `app_user` con pool pequeño. `get_tenant_db` aplica en **cada transacción** `set_config('app.tenant_id' | 'app.user_id' | 'app.role', <del JWT>, true)`; nunca `SET` de sesión (compatible con el pooler en modo transacción). `get_control_db` no lleva contexto y solo sirve para el esquema `control` (login, registro, `/health`, administración).
 
 Reglas que nunca se rompen:
-1. **Prohibido usar un engine/sesión global** para datos de negocio. Todo endpoint obtiene la sesión mediante la dependencia compartida `get_tenant_db`.
-2. **El `tenant_id` sale solo del JWT verificado**, jamás de un parámetro, header o body enviado por el cliente.
-3. Ninguna consulta mezcla datos de dos tenants. No hay JOINs entre bases.
-4. Archivos en Storage con prefijo/bucket por tenant (`{tenant_slug}/...`), validando pertenencia antes de firmar una URL.
-5. Cada acceso a datos de pacientes escribe un registro de auditoría en la base del tenant (quién, qué, cuándo, IP). El log de auditoría es por tenant (CU-13).
-6. Toda migración debe poder correr en todas las bases de tenant (`migrate_all_tenants`) y ser idempotente.
-7. Todo endpoint nuevo incluye una prueba de **acceso cruzado**: un usuario del tenant A no puede leer ni modificar datos del tenant B.
+1. **Ninguna sesión sin contexto toca datos clínicos.** Todo endpoint clínico usa `get_tenant_db`; la app nunca usa el rol dueño ni crea engines propios.
+2. **El `tenant_id`, el `user_id` y el `role` salen solo del JWT verificado** (y releído en `control`), jamás de un parámetro, header o body enviado por el cliente.
+3. Toda tabla de `clinical` se crea con los helpers de `backend/migrations/rls.py` (`create_tenant_table`, `enable_tenant_rls`, `tenant_fk`, `grant_app`). Las referencias entre tablas clínicas son **FKs compuestas** `(tenant_id, x_id)`. La prueba de catálogo falla si una tabla queda sin RLS forzado o sin política, o si aparece una vista sin `security_invoker` o una función `SECURITY DEFINER`.
+4. Archivos en Storage con prefijo `{tenant_slug}/...` en bucket **privado**; se valida pertenencia (fila visible por RLS y prefijo correcto) antes de firmar una URL de corta duración. Nunca URLs públicas.
+5. Cada acceso a datos de pacientes escribe un registro en `clinical.audit_log` del tenant, en la misma transacción (quién, acción, recurso, cuándo, IP; sin datos clínicos ni tokens) (CU-13).
+6. Una sola línea de Alembic; toda migración es idempotente y probada con upgrade → downgrade → upgrade en Postgres.
+7. Todo endpoint nuevo incluye una prueba de **acceso cruzado** contra Postgres real: un usuario del tenant A no puede leer, modificar ni referenciar datos del tenant B (403/404 sin revelar existencia).
+8. Las tablas no se exponen por la Data API de Supabase (esquemas no expuestos y permisos revocados a `anon`/`authenticated`).
 
-**Alta de tenant (CU-12)**: endpoint solo para `platform_admin` que crea la fila en `tenants`, aprovisiona/asigna la base, corre migraciones y crea el primer `tenant_admin`. Debe ser demostrable en vivo.
+**Alta de tenant (CU-12)**: endpoint solo para `platform_admin` que, en **una transacción atómica**, crea el tenant, su slug, el primer `tenant_admin` y el registro de auditoría. Tras crearlo, el chequeo de aislamiento demuestra como `app_user` que el tenant nuevo ve 0 filas ajenas y nadie ve las suyas. Debe ser demostrable en vivo.
 
-**Compartir con el médico (CU-07)** cruza tenants. Se resuelve sin consultas entre bases: la paciente genera un paquete (resultados, heatmaps, diario) con un token de un solo uso y expiración corta; la doctora lo **importa como copia** en su tenant. El token se invalida tras el primer uso y queda auditado en ambos lados.
+**Compartir con el médico (CU-07)** cruza tenants. Se resuelve sin excepciones de política entre tenants: la paciente genera un paquete (resultados, heatmaps, diario) con un token de un solo uso y expiración corta; la doctora lo **importa como copia** en su tenant. El token se invalida tras el primer uso y queda auditado en ambos lados.
 
 ## Modelo de IA
 
@@ -184,7 +188,7 @@ Estado: EfficientNet-B0 en **Keras/TensorFlow** (`.h5`) entrenado con BUSI. Hay 
 ## Plan por fases (6 semanas)
 
 - **Fase 0 (2 días)**: auditar el prototipo, cerrar brechas 1 y 2, agregar Alembic, pytest, ruff y CI básico en GitHub Actions.
-- **Semana 1 — Multitenencia**: base de control, `tenants`, resolución de tenant, roles, migraciones multi-base, alta de tenant (CU-12), log de auditoría (CU-13).
+- **Semana 1 — Multitenencia**: esquemas `control`/`clinical` con RLS forzado, roles de base, resolución de tenant por transacción, roles de aplicación, alta de tenant con chequeo de aislamiento (CU-12), log de auditoría (CU-13).
 - **Semana 2 — B2C núcleo**: registro con consentimiento y cuestionario (CU-01), subida + predicción + heatmap + reporte sencillo (CU-02).
 - **Semana 3 — B2C complementario**: autoexploración guiada, diario con mapa corporal, recordatorios, blog (CU-03 a CU-06).
 - **Semana 4 — Puente y B2B**: compartir paquete (CU-07), panel médico y lista de pacientes con filtros (CU-08, CU-11), carga DICOM (CU-09).
