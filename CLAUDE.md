@@ -20,7 +20,8 @@ Prioridad de implementación acordada: **1) multitenencia (CU-12, CU-13), 2) B2C
 - `backend/` — app FastAPI (`backend/app`)
 - `frontend/` — SPA React 19 + Vite
 - `backend/migrations/` + `backend/alembic.ini` — migraciones de Alembic (una sola línea hasta la Semana 1)
-- `tests/` — pytest (`conftest.py` con fixtures; `helpers.py` con utilidades importables)
+- `tests/` — pytest contra **Postgres real** (`pgtest.py`: base temporal y variables de prueba; `conftest.py`: fixtures; `helpers.py`: fábricas; `isolation/`: pruebas de RLS y catálogo)
+- `docker-compose.yml` — Postgres 17 local para pruebas (puerto 54329)
 - `infraestructure/` — reservado para despliegue/IaC; todavía no existe en el repo (git no guarda carpetas vacías). El nombre lleva ese typo a propósito; no renombrar sin avisar
 - `docs/` — casos de uso (`casos-de-uso.md`) y decisiones de arquitectura (`adr/`). El guion de demo está pendiente
 - `.github/workflows/ci.yml` — CI: ruff y pytest en cada push y PR (Python 3.12, sin TensorFlow)
@@ -47,7 +48,8 @@ uvicorn backend.app.main:app --reload
 Pruebas y calidad:
 
 ```
-pytest -q                      # pruebas (desde la Semana 1, contra Postgres local: docker compose up -d db)
+docker compose up -d db        # Postgres local de pruebas (una vez)
+pytest -q                      # pruebas contra ese Postgres (TEST_DATABASE_URL); sin él se omiten
 ruff check . && ruff format .  # lint y formato (configuración en pyproject.toml)
 alembic -c backend/alembic.ini upgrade head   # migra la base de DATABASE_URL (o -x dburl=...)
 ```
@@ -87,17 +89,21 @@ Reglas de infraestructura:
 ### Backend (`backend/app`)
 
 - `main.py`: carga `.env`, crea `FastAPI()`, agrega `CORSMiddleware` (orígenes de `FRONTEND_ORIGIN`, separados por coma) y monta tres routers bajo `/api/v1`: `health`, `auth` (`/auth`) e `images` (`/images`).
-- `models/base.py`: `Base` declarativa, sin efectos secundarios (la importan los modelos y `backend/migrations/env.py`).
-- `models/database.py`: `engine` y `SessionLocal` globales leídos de `DATABASE_URL` (engine global con el rol dueño; **se elimina en la Semana 1**: la app solo tendrá el engine de `app_user`).
-- `models/user.py` (`User`) y `models/image.py` (`MedicalImage`), relacionados por `MedicalImage.user_id -> User.id`.
-- `api/deps.py`: dependencias compartidas. `get_db` es el **único** punto que entrega sesiones (alias `DbSession`); `get_current_user` (alias `CurrentUser`) lee el Bearer token y devuelve el `User`; `get_storage` (alias `Storage`) entrega el servicio de Storage y es el punto de override en pruebas. En la Semana 1, `get_db` se divide en `get_control_db` (login/registro, que aún no tienen JWT) y `get_tenant_db` (ver ADR 0002 y 0003).
-- `api/v1/*`: routers delgados; la lógica vive en `services/`, y los esquemas Pydantic de entrada/salida en `schemas/`.
-- `/auth/register` recibe JSON (`UserCreate`) y devuelve `UserOut`; `/auth/token` (formulario OAuth2) devuelve `Token` o 401.
-- `/health` solo hace `SELECT 1` (503 genérico si falla). El esquema lo crea **Alembic** (`backend/migrations/`); nunca `create_all`.
-- `services/auth.py`: hash con `passlib`/bcrypt y JWT con `python-jose` (`sub` = id del usuario, `exp` y `sub` obligatorios); también `create_user`, `authenticate_user` y `get_user_by_email`. Los endpoints viven en `api/v1/auth.py`.
-- `services/images.py`: valida la subida (extensión y MIME JPG/PNG, tamaño `MAX_UPLOAD_MB`, que abra con Pillow), escribe un temporal con nombre uuid en el directorio temporal del sistema (lo borra en `finally`) y sube a Storage como `uploads/{user_id}/{uuid}.{ext}`. El nombre del archivo del cliente nunca forma parte de una ruta. DICOM se rechaza hasta CU-09.
+- `db.py`: conexión de la app. Hay un solo engine, con el rol `app_user` (URL derivada de `DATABASE_URL` + `APP_DB_PASSWORD`, o `APP_DATABASE_URL`) y pool pequeño. `new_session(context)` crea sesiones; el listener `after_begin` aplica `set_config('app.tenant_id' | 'app.user_id' | 'app.role', ..., true)` en cada transacción. `assert_safe_db_role()` corre en el lifespan: la app no arranca con un rol superusuario, BYPASSRLS o distinto de `APP_DB_USER`.
+- `models/base.py`: `Base` declarativa. `models/control.py` (`Tenant`, `User`) y `models/clinical.py` (`Patient`, `MedicalImage`, `AuditLog`). En `clinical`, `tenant_id` lo pone la base desde el contexto; el código no lo asigna.
+- `api/deps.py`:
+  - `get_control_db` / `ControlDb`: sesión sin contexto, solo para `control`.
+  - `get_current_user` / `CurrentUser`: devuelve `AuthContext` (JWT verificado y releído en `control`).
+  - `get_tenant_db` / `TenantDb`: sesión con contexto RLS; rechaza a `platform_admin`.
+  - `require_role(...)`.
+  - `get_storage` / `Storage`: punto de override en pruebas.
+- `api/v1/*`: routers delgados; la lógica vive en `services/` y los esquemas Pydantic en `schemas/`.
+- `/auth/register` (JSON, `extra="forbid"`): crea siempre un `patient` en el tenant `b2c`, con su cuenta en `control.users` y su ficha en `clinical.patients` en una transacción. `/auth/token` responde 401 genérico, o 403 si la cuenta o el tenant están inactivos. El JWT lleva `sub`, `tenant_id`, `role` y `exp`.
+- `/health` solo hace `SELECT 1` con `get_control_db` (503 genérico si falla). El esquema lo crea **Alembic** (`backend/migrations/`, helpers RLS en `backend/migrations/rls.py`); nunca `create_all`.
+- `services/auth.py`: hash bcrypt, JWT, `register_patient`, `authenticate_user` y `load_auth_context`.
+- `services/images.py`: valida la subida (extensión y MIME JPG/PNG, tamaño `MAX_UPLOAD_MB`, que abra con Pillow) y sube a `{tenant_slug}/images/{uuid}.{ext}` con un temporal uuid que se borra en `finally`. La fila guarda `object_path`, no una URL. DICOM se rechaza hasta CU-09.
 - `services/ml_model.py`: `BreastCancerModel` envuelve un modelo **Keras/TensorFlow** (`.h5`, ruta en `MODEL_PATH`, por defecto `models/breast_cancer_model.h5`). El `.h5` no está en el repo y **ningún router lo invoca aún**.
-- `services/storage.py`: `SupabaseStorage.upload_file` sube al bucket de Supabase Storage (cliente creado al primer uso) y devuelve la URL pública, que se guarda en `MedicalImage.image_path`. Los fallos se registran solo por tipo y se lanzan como `StorageError` (502). No se usa AWS/S3.
+- `services/storage.py`: `SupabaseStorage.upload_file` sube al bucket de Supabase Storage (cliente creado al primer uso). Los fallos se registran solo por tipo y se lanzan como `StorageError` (502). No se usa AWS/S3.
 
 ### Frontend (`frontend/src`)
 
@@ -107,13 +113,13 @@ SPA estándar: `main.jsx` monta `App.jsx`, que define rutas con `react-router-do
 
 Resueltas en la Fase 0: usuario de `/images/upload` tomado del JWT (antes `user_id=1`), temporales con uuid y limpieza en `finally`, validación de subidas, `get_db` unificado, Alembic, pytest, ruff y CI.
 
+Resueltas en la Semana 1 (rama `semana1-modelo`): roles asignados (sin `is_medical`), prefijo `{tenant_slug}/` en Storage y `object_path` en lugar de URL.
+
 Pendientes:
-1. Las URLs públicas de Supabase Storage no sirven para datos médicos: pasar a bucket privado con URLs firmadas de corta duración (guardar la ruta del objeto, no la URL).
-2. El modelo no está conectado al flujo de subida y es binario (benigno/maligno); CU-02 pide también "normal" (BUSI tiene las tres clases).
-3. Sin rate limit en `/auth/token` ni `/images/upload`.
-4. `is_medical` lo declara el propio usuario al registrarse; se sustituye por roles asignados en la Semana 1.
-5. Si falla el commit después de subir a Storage, queda un objeto huérfano.
-6. La ruta `uploads/{user_id}/...` es provisional: en la Semana 1 pasa a `{tenant_slug}/...` con el slug resuelto en el servidor.
+1. Bucket privado y URLs firmadas de corta duración (Semana 1, rama de auditoría y Storage).
+2. Sin rate limit en `/auth/token`, `/auth/register` ni `/images/upload` (Semana 1, misma rama).
+3. El modelo no está conectado al flujo de subida y es binario (benigno/maligno); CU-02 pide también "normal" (BUSI tiene las tres clases).
+4. Si falla el commit después de subir a Storage, queda un objeto huérfano.
 
 ## Arquitectura objetivo: multitenencia con RLS (REGLAS INNEGOCIABLES)
 
