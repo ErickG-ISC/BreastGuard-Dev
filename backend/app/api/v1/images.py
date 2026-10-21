@@ -3,6 +3,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile, status
 
+from backend.app.api.client_ip import client_ip
 from backend.app.api.deps import Storage, TenantDb, require_role
 from backend.app.api.rate_limit import rate_limit
 from backend.app.schemas.image import ImageDetailOut, ImageOut, ImageUploadOut
@@ -21,7 +22,7 @@ ClinicalUser = Annotated[AuthContext, Depends(require_role("patient", "doctor", 
 
 
 def _client_ip(request: Request) -> str | None:
-    return request.client.host if request.client else None
+    return client_ip(request)
 
 
 @router.post(

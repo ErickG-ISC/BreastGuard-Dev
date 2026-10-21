@@ -6,6 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
 
+from backend.app.api.client_ip import client_ip
 from backend.app.api.deps import TenantDb, require_role
 from backend.app.schemas.audit import AuditEntryOut
 from backend.app.services import audit
@@ -38,7 +39,7 @@ def list_audit_log(
         actor_role=auth.role,
         action="audit.read",
         resource_type="audit_log",
-        ip=request.client.host if request.client else None,
+        ip=client_ip(request),
     )
     db.commit()
     return entries

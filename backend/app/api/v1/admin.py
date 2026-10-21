@@ -5,6 +5,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
+from backend.app.api.client_ip import client_ip
 from backend.app.api.deps import ControlDb, require_role
 from backend.app.schemas.tenants import (
     ActiveUpdate,
@@ -24,7 +25,7 @@ PlatformAdmin = Annotated[AuthContext, Depends(require_role("platform_admin"))]
 
 
 def _client_ip(request: Request) -> str | None:
-    return request.client.host if request.client else None
+    return client_ip(request)
 
 
 def _not_found() -> HTTPException:

@@ -1,8 +1,8 @@
 """Límite de peticiones en memoria (ventana deslizante por IP y ruta), sin dependencias.
 
 Suficiente para una sola instancia (Render gratuito). Con varias instancias haría falta un
-almacén compartido. La IP sale de `request.client.host`; en Render, uvicorn corre con
-`--proxy-headers` para que sea la del cliente y no la del proxy.
+almacén compartido (ADR 0004). La IP sale de `client_ip()`, que no confía en X-Forwarded-For
+salvo detrás de un proxy declarado (`TRUSTED_PROXY_HOPS`).
 """
 
 import math
@@ -12,7 +12,9 @@ from collections import deque
 
 from fastapi import HTTPException, Request, status
 
-_MAX_KEYS = 10_000
+from backend.app.api.client_ip import client_ip
+
+_MAX_KEYS = 1_000
 
 
 class RateLimiter:
@@ -50,7 +52,7 @@ def rate_limit(name: str, limit: int, window_seconds: int):
     """Dependencia de FastAPI: `dependencies=[Depends(rate_limit("auth_token", 10, 60))]`."""
 
     def dependency(request: Request) -> None:
-        ip = request.client.host if request.client else "desconocida"
+        ip = client_ip(request) or "desconocida"
         retry_after = limiter.hit((name, ip), limit, window_seconds)
         if retry_after is not None:
             raise HTTPException(

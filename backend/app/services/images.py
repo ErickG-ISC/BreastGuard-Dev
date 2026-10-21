@@ -5,6 +5,7 @@ import tempfile
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NoReturn
 
 from fastapi import HTTPException, UploadFile, status
 from PIL import Image
@@ -140,6 +141,17 @@ def _audit(
     )
 
 
+def _deny(db: Session, auth: AuthContext, image_id: uuid.UUID, ip: str | None) -> NoReturn:
+    """Registra el intento denegado en el tenant de quien preguntó y responde 404 uniforme.
+
+    Solo guarda el id solicitado (lo envió el propio usuario): no revela si existe en otro lado.
+    """
+    db.rollback()
+    _audit(db, auth, "image.denied", image_id, ip)
+    db.commit()
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Imagen no encontrada")
+
+
 def list_images(db: Session, auth: AuthContext, ip: str | None) -> list[MedicalImage]:
     """RLS limita al tenant; la política por rol limita a la paciente sus propias imágenes."""
     images = list(db.scalars(select(MedicalImage).order_by(MedicalImage.created_at.desc())))
@@ -152,14 +164,13 @@ def get_image_with_url(
     db: Session, storage: SupabaseStorage, auth: AuthContext, image_id: uuid.UUID, ip: str | None
 ) -> tuple[MedicalImage, str, int]:
     """Imagen visible por RLS + URL firmada. Ajena o inexistente responden igual (404)."""
-    not_found = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Imagen no encontrada")
     image = db.scalars(select(MedicalImage).where(MedicalImage.id == image_id)).first()
     if image is None:
-        raise not_found
+        _deny(db, auth, image_id, ip)
     # Defensa en profundidad: nunca firmar una ruta fuera del prefijo del tenant
     if not image.object_path.startswith(f"{auth.tenant_slug}/"):
         logger.error("Imagen con ruta fuera del prefijo de su tenant (id=%s)", image.id)
-        raise not_found
+        _deny(db, auth, image_id, ip)
     ttl = signed_url_ttl()
     try:
         url = storage.create_signed_url(image.object_path, ttl)
