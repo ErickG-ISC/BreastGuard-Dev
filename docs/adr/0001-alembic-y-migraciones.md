@@ -1,5 +1,7 @@
 # ADR 0001 — Alembic para el esquema y fin de `create_all`
 
+> Nota (Semana 1): lo referido a separar líneas `alembic_control`/`alembic_tenant` y a `migrate_all_tenants` queda **reemplazado por el ADR 0002**. Hay una sola base y una sola línea de migraciones. Lo demás sigue vigente.
+
 - Estado: aceptado (Fase 0, 2026-10-20)
 
 ## Contexto
