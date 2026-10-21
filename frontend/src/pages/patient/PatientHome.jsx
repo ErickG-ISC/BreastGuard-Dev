@@ -64,9 +64,14 @@ export default function PatientHome() {
             <Typography variant="body2" sx={{ mb: 2 }}>
               Sube una ecografía mamaria y recibe un resultado orientativo con un mapa de las zonas que el modelo observó.
             </Typography>
-            <Button component={RouterLink} to="/analizar" variant="contained">
-              Subir ecografía
-            </Button>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+              <Button component={RouterLink} to="/analizar" variant="contained">
+                Subir ecografía
+              </Button>
+              <Button component={RouterLink} to="/historial">
+                Ver historial
+              </Button>
+            </Stack>
           </CardContent>
         </Card>
 

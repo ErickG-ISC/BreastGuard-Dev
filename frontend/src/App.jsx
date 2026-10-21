@@ -7,6 +7,9 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import PatientHome from './pages/patient/PatientHome';
 import Questionnaire from './pages/patient/Questionnaire';
+import Analyze from './pages/patient/Analyze';
+import Result from './pages/patient/Result';
+import History from './pages/patient/History';
 import Tenants from './pages/admin/Tenants';
 
 const theme = createTheme({
@@ -45,6 +48,30 @@ function App() {
               element={
                 <ProtectedRoute roles={['platform_admin']}>
                   <Tenants />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/analizar"
+              element={
+                <ProtectedRoute roles={['patient']}>
+                  <Analyze />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/resultado/:id"
+              element={
+                <ProtectedRoute roles={['patient']}>
+                  <Result />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/historial"
+              element={
+                <ProtectedRoute roles={['patient']}>
+                  <History />
                 </ProtectedRoute>
               }
             />
