@@ -4,7 +4,7 @@ from fastapi import APIRouter, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
-from backend.app.api.deps import DbSession
+from backend.app.api.deps import ControlDb
 
 logger = logging.getLogger(__name__)
 
@@ -12,7 +12,7 @@ router = APIRouter()
 
 
 @router.get("/health")
-def health_check(db: DbSession):
+def health_check(db: ControlDb):
     """Solo chequeo de estado. El esquema se crea con Alembic, no aquí."""
     try:
         db.execute(text("SELECT 1"))

@@ -3,13 +3,23 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.api.v1 import auth, health, images
+from backend.app.db import assert_safe_db_role
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Falla cerrado: sin rol seguro (no superusuario, no BYPASSRLS) la app no arranca
+    assert_safe_db_role()
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 
 frontend_origins = os.environ.get("FRONTEND_ORIGIN", "http://localhost:5173").split(",")
 app.add_middleware(

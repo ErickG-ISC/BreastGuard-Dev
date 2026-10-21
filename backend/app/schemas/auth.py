@@ -1,11 +1,16 @@
+import uuid
+
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
 class UserCreate(BaseModel):
+    """Registro público: solo crea pacientes en el tenant B2C. No acepta rol ni tenant."""
+
+    model_config = ConfigDict(extra="forbid")
+
     email: EmailStr
     password: str = Field(min_length=8)
     full_name: str = Field(min_length=1, max_length=200)
-    is_medical: bool = False
 
     @field_validator("password")
     @classmethod
@@ -19,10 +24,11 @@ class UserCreate(BaseModel):
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    id: int
+    id: uuid.UUID
     email: EmailStr
     full_name: str
-    is_medical: bool
+    role: str
+    tenant_id: uuid.UUID | None
 
 
 class Token(BaseModel):

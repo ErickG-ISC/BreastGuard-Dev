@@ -7,10 +7,11 @@ from pathlib import Path
 
 from fastapi import HTTPException, UploadFile, status
 from PIL import Image
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from backend.app.models.image import MedicalImage
-from backend.app.models.user import User
+from backend.app.models.clinical import MedicalImage, Patient
+from backend.app.services.auth import AuthContext
 from backend.app.services.storage import StorageError, SupabaseStorage
 
 # Extensiones aceptadas -> MIME esperado. DICOM llega con CU-09 (requiere pydicom).
@@ -75,27 +76,43 @@ async def read_and_validate_image(file: UploadFile) -> ValidatedImage:
 def store_medical_image(
     db: Session,
     storage: SupabaseStorage,
-    user: User,
+    auth: AuthContext,
     image: ValidatedImage,
     image_type: str,
 ) -> MedicalImage:
-    """Sube la imagen a Storage y registra la fila; el temporal se borra siempre."""
+    """Sube la imagen al prefijo del tenant y registra la fila; el temporal se borra siempre.
+
+    `db` es una sesión de get_tenant_db: RLS limita todo al tenant (y a la paciente) del JWT.
+    """
+    patient = db.scalars(select(Patient).where(Patient.user_id == auth.user_id)).first()
+    if patient is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="No se encontró tu ficha de paciente"
+        )
+
+    image_id = uuid.uuid4()
+    # Prefijo del tenant resuelto en el servidor (nunca del cliente)
+    object_name = f"{auth.tenant_slug}/images/{image_id.hex}{image.extension}"
     temp_path = Path(tempfile.gettempdir()) / f"{uuid.uuid4().hex}{image.extension}"
     try:
         temp_path.write_bytes(image.data)
-        object_name = f"uploads/{user.id}/{uuid.uuid4().hex}{image.extension}"
         try:
-            image_url = storage.upload_file(str(temp_path), object_name, image.content_type)
+            storage.upload_file(str(temp_path), object_name, image.content_type)
         except StorageError:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="No se pudo guardar la imagen. Intenta de nuevo.",
             ) from None
 
-        db_image = MedicalImage(user_id=user.id, image_path=image_url, image_type=image_type)
+        db_image = MedicalImage(
+            id=image_id,
+            patient_id=patient.id,
+            uploaded_by=auth.user_id,
+            object_path=object_name,
+            image_type=image_type,
+        )
         db.add(db_image)
         db.commit()
-        db.refresh(db_image)
         return db_image
     finally:
         temp_path.unlink(missing_ok=True)
