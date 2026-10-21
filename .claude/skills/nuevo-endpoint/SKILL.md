@@ -1,6 +1,6 @@
 ---
 name: nuevo-endpoint
-description: Crea un endpoint nuevo en BreastGuard siguiendo las reglas de multitenencia: ruta, esquemas Pydantic, servicio, dependencia de tenant, auditoría y pruebas con acceso cruzado. Úsalo cuando el usuario pida agregar o implementar un endpoint, ruta o caso de uso (CU-xx) del backend.
+description: Crea un endpoint nuevo en BreastGuard siguiendo las reglas de multitenencia con RLS: ruta, esquemas Pydantic, servicio, dependencia de sesión (get_tenant_db o get_control_db), auditoría y pruebas con acceso cruzado en Postgres. Úsalo cuando el usuario pida agregar o implementar un endpoint, ruta o caso de uso (CU-xx) del backend.
 ---
 
 # Nuevo endpoint (BreastGuard)
@@ -28,7 +28,8 @@ Sigue estos pasos en orden. Antes de empezar, relee la sección "Arquitectura ob
 ## 3. Servicio (`backend/app/services/<recurso>.py`)
 
 - Toda la lógica de negocio va aquí; el router solo orquesta.
-- Recibe la `Session` del tenant como parámetro; **nunca** importa un engine ni `SessionLocal` global.
+- Recibe la `Session` como parámetro; **nunca** importa un engine ni crea sesiones. Para datos clínicos es la de `get_tenant_db` (con contexto RLS); para el esquema `control`, la de `get_control_db`.
+- No llames a `set_config` ni cambies el contexto: lo aplica la dependencia en cada transacción.
 - SQLAlchemy 2.0 con `select()`. Verifica siempre que el recurso pertenezca al usuario o a su rol antes de devolverlo o modificarlo.
 - Si el recurso no existe **o** no pertenece al usuario, responde igual (404) para no revelar existencia.
 - Usa `logging`, nunca `print`, y no registres datos clínicos ni tokens.
@@ -36,18 +37,18 @@ Sigue estos pasos en orden. Antes de empezar, relee la sección "Arquitectura ob
 ## 4. Router (`backend/app/api/v1/<recurso>.py`)
 
 - Router delgado. Dependencias obligatorias:
-  - sesión: `db: Session = Depends(get_tenant_db)`
-  - usuario: `current_user = Depends(get_current_user)`
+  - sesión: `TenantDb` (alias de `Depends(get_tenant_db)`) para datos clínicos, o `ControlDb` solo para el esquema `control`
+  - usuario: `CurrentUser` (alias de `Depends(get_current_user)`)
   - rol: `Depends(require_role("doctor"))` (o el que corresponda); los endpoints de plataforma exigen `platform_admin`.
 - Define `response_model`, códigos de estado correctos y `HTTPException` con mensajes claros.
-- Si el endpoint toca datos de pacientes (lectura o escritura), llama al servicio de auditoría para registrar quién, qué, cuándo e IP, en la base del tenant.
-- Si maneja archivos: nombre aleatorio (uuid), ruta con prefijo `{tenant_slug}/`, limpieza de temporales en `finally`, y URLs firmadas de corta duración (nunca URL pública permanente).
+- Si el endpoint toca datos de pacientes (lectura o escritura), llama a `services/audit.record(...)` en la misma transacción (quién, acción, recurso, cuándo, IP), sin datos clínicos.
+- Si maneja archivos: nombre aleatorio (uuid), ruta con prefijo `{tenant_slug}/` tomado de `CurrentUser`, limpieza de temporales en `finally` y URLs firmadas de corta duración en bucket privado (nunca URL pública).
 - Registra el router en `main.py` bajo `/api/v1/<prefijo>`.
 
 ## 5. Modelo y migración (solo si hay tablas nuevas o cambios)
 
 - Crea o modifica el modelo en `backend/app/models/`.
-- Usa la skill `migracion-multitenant` para generar y aplicar la migración a todas las bases de tenant. No uses `Base.metadata.create_all`.
+- Usa la skill `migracion-rls`: toda tabla de `clinical` se crea con los helpers de `backend/migrations/rls.py` (tenant_id, RLS forzado, políticas, FKs compuestas y permisos). No uses `Base.metadata.create_all`.
 
 ## 6. Pruebas (`tests/api/test_<recurso>.py`)
 
@@ -55,10 +56,10 @@ Delega en el subagente `test-writer` o escribe tú mismo, cubriendo como mínimo
 
 1. Camino feliz con el rol correcto.
 2. 401 sin token o con token inválido; 403 con rol incorrecto.
-3. **Acceso cruzado (obligatorio)**: usuario del tenant A contra recurso del tenant B → 403/404 sin revelar existencia, y nada cambia en la base de B.
+3. **Acceso cruzado (obligatorio, en Postgres)**: usuario del tenant A contra recurso del tenant B → 403/404 sin revelar existencia, y nada cambia en las filas de B.
 4. Que un `tenant_id` enviado por el cliente se ignora.
 5. Validación de entrada (422) y de archivos si aplica.
-6. Registro de auditoría en el tenant correcto.
+6. Registro de auditoría con el `tenant_id` correcto e invisible desde otro tenant.
 
 ## 7. Verificación final
 
