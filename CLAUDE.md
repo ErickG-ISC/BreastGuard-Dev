@@ -98,7 +98,11 @@ Reglas de infraestructura:
   - `require_role(...)`.
   - `get_storage` / `Storage`: punto de override en pruebas.
 - `api/v1/*`: routers delgados; la lógica vive en `services/` y los esquemas Pydantic en `schemas/`.
-- `/auth/register` (JSON, `extra="forbid"`): crea siempre un `patient` en el tenant `b2c`, con su cuenta en `control.users` y su ficha en `clinical.patients` en una transacción. `/auth/token` responde 401 genérico, o 403 si la cuenta o el tenant están inactivos. El JWT lleva `sub`, `tenant_id`, `role` y `exp`.
+- `/auth/register` (JSON, `extra="forbid"`): crea siempre un `patient` en el tenant `b2c` y exige el consentimiento vigente (`consent_accepted: true`, `consent_version`) y un `plan_code` simulado. En una transacción crea la cuenta (`control.users`), el consentimiento (`control.consents`), la suscripción simulada (`control.subscriptions`) y la ficha (`clinical.patients`). Ver ADR 0005.
+- `api/v1/onboarding.py` (CU-01):
+  - públicos: `GET /consent/current` y `GET /plans`;
+  - solo pacientes: `GET/PUT /subscription/me`, `GET /questionnaire/current`, `POST /questionnaires` y `GET /questionnaires/latest`.
+  - Los textos y reglas están en `backend/app/content/`: el consentimiento en markdown, el cuestionario v1 y `risk_rules.py`, que da factores a comentar y nunca una probabilidad. `/auth/token` responde 401 genérico, o 403 si la cuenta o el tenant están inactivos. El JWT lleva `sub`, `tenant_id`, `role` y `exp`.
 - `/health` solo hace `SELECT 1` con `get_control_db` (503 genérico si falla). El esquema lo crea **Alembic** (`backend/migrations/`, helpers RLS en `backend/migrations/rls.py`); nunca `create_all`.
 - `services/auth.py`: hash bcrypt, JWT, `register_patient`, `authenticate_user` y `load_auth_context`.
 - `services/images.py`: valida la subida (extensión y MIME JPG/PNG, tamaño `MAX_UPLOAD_MB`, que abra con Pillow) y sube a `{tenant_slug}/images/{uuid}.{ext}` con un temporal uuid que se borra en `finally`. La fila guarda `object_path`, no una URL. DICOM se rechaza hasta CU-09.
