@@ -1,52 +1,34 @@
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from sqlalchemy.orm import Session
+from typing import Annotated
 
-from backend.app.models.database import SessionLocal
-from backend.app.models.user import User
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm
+
+from backend.app.api.deps import DbSession
+from backend.app.schemas.auth import Token, UserCreate, UserOut
 from backend.app.services.auth import (
+    authenticate_user,
     create_access_token,
-    get_password_hash,
-    verify_password,
+    create_user,
+    get_user_by_email,
 )
 
 router = APIRouter()
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+@router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
+def register(data: UserCreate, db: DbSession):
+    if get_user_by_email(db, data.email):
+        raise HTTPException(status_code=400, detail="El email ya está registrado")
+    return create_user(db, data)
 
 
-@router.post("/register")
-def register(
-    email: str,
-    password: str,
-    full_name: str,
-    is_medical: bool = False,
-    db: Session = Depends(get_db),
-):
-    db_user = db.query(User).filter(User.email == email).first()
-    if db_user:
-        raise HTTPException(status_code=400, detail="Email already registered")
-    hashed_password = get_password_hash(password)
-    db_user = User(
-        email=email, hashed_password=hashed_password, full_name=full_name, is_medical=is_medical
-    )
-    db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
-    return {"message": "User created successfully"}
-
-
-@router.post("/token")
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == form_data.username).first()
-    if not user or not verify_password(form_data.password, user.hashed_password):
-        raise HTTPException(status_code=400, detail="Incorrect email or password")
-    access_token = create_access_token(data={"sub": user.email})
-    return {"access_token": access_token, "token_type": "bearer"}
+@router.post("/token", response_model=Token)
+def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()], db: DbSession):
+    user = authenticate_user(db, form_data.username, form_data.password)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Email o contraseña incorrectos",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return Token(access_token=create_access_token(user.id))
