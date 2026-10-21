@@ -15,12 +15,25 @@ jobs:
   backend:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      # Postgres real: las pruebas de aislamiento (RLS) no valen en SQLite
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres # credencial efímera de CI, no es un secreto
+        ports:
+          - 54329:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
     env:
-      # Valores ficticios: las pruebas usan SQLite en memoria y un doble de Storage
-      DATABASE_URL: "sqlite://"
-      SECRET_KEY: "clave-solo-para-ci"
-      SUPABASE_URL: "http://localhost:54321"
-      SUPABASE_KEY: "clave-falsa"
+      # tests/pgtest.py crea una base temporal aquí y fija el resto de variables (ficticias)
+      TEST_DATABASE_URL: "postgresql://postgres:postgres@localhost:54329/postgres"
+      # En CI, si Postgres no responde, las pruebas fallan en lugar de omitirse
+      REQUIRE_POSTGRES: "1"
     steps:
       - uses: actions/checkout@v4
         with:

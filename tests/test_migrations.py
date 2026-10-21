@@ -1,89 +1,139 @@
-from pathlib import Path
+"""Migraciones en Postgres real: cada prueba usa una base nueva y la borra al terminar."""
+
+import uuid
 
 import pytest
 from alembic import command
 from alembic.autogenerate import compare_metadata
-from alembic.config import Config
 from alembic.migration import MigrationContext
 from sqlalchemy import create_engine, inspect, text
 
+from backend.app.models import clinical, control  # noqa: F401  (registra las tablas)
 from backend.app.models.base import Base
+from tests.helpers import default_password_hash
+from tests.pgtest import OWNER_URL, alembic_config, create_database, drop_database
 
-ALEMBIC_INI = Path(__file__).resolve().parents[1] / "backend" / "alembic.ini"
-APP_TABLES = {"users", "medical_images"}
+APP_SCHEMAS = {"control", "clinical"}
 
 
 @pytest.fixture
-def db_url(tmp_path: Path) -> str:
-    return f"sqlite:///{(tmp_path / 'migraciones.db').as_posix()}"
-
-
-def alembic_config(db_url: str) -> Config:
-    config = Config(str(ALEMBIC_INI))
-    config.attributes["dburl"] = db_url
-    return config
-
-
-def table_names(db_url: str) -> set[str]:
-    engine = create_engine(db_url)
+def fresh_db(postgres_available):
+    name = f"bg_mig_{uuid.uuid4().hex[:10]}"
+    create_database(name)
+    url = OWNER_URL.set(database=name).render_as_string(hide_password=False)
+    engine = create_engine(url)
     try:
-        return set(inspect(engine).get_table_names()) - {"alembic_version"}
+        yield url, engine
     finally:
         engine.dispose()
+        drop_database(name)
 
 
-def test_upgrade_downgrade_upgrade(db_url):
-    config = alembic_config(db_url)
+def tables(engine, schema: str) -> set[str]:
+    return set(inspect(engine).get_table_names(schema=schema)) - {"alembic_version"}
+
+
+def test_upgrade_downgrade_upgrade(fresh_db):
+    url, engine = fresh_db
+    config = alembic_config(url)
 
     command.upgrade(config, "head")
-    assert table_names(db_url) == APP_TABLES
+    assert tables(engine, "control") == {"tenants", "users"}
+    assert tables(engine, "clinical") == {"patients", "medical_images", "audit_log"}
 
     command.downgrade(config, "base")
-    assert table_names(db_url) == set()
+    assert not inspect(engine).has_schema("clinical")
+    assert tables(engine, "public") == set()
 
     command.upgrade(config, "head")
-    assert table_names(db_url) == APP_TABLES
+    assert tables(engine, "clinical") == {"patients", "medical_images", "audit_log"}
 
 
-def test_migracion_coincide_con_los_modelos(db_url):
-    command.upgrade(alembic_config(db_url), "head")
-
-    engine = create_engine(db_url)
-    try:
-        with engine.connect() as connection:
-            diff = compare_metadata(MigrationContext.configure(connection), Base.metadata)
-    finally:
-        engine.dispose()
-    assert diff == []
+def test_upgrade_head_dos_veces_es_idempotente(fresh_db):
+    url, engine = fresh_db
+    command.upgrade(alembic_config(url), "head")
+    command.upgrade(alembic_config(url), "head")
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT count(*) FROM control.tenants")).scalar_one() == 1
 
 
-def test_idempotente_sobre_base_creada_con_create_all(db_url):
-    # Bases existentes (Supabase de desarrollo) se crearon con el antiguo create_all de /health
-    engine = create_engine(db_url)
-    Base.metadata.create_all(engine)
-    engine.dispose()
+def test_migracion_coincide_con_los_modelos(fresh_db):
+    url, engine = fresh_db
+    command.upgrade(alembic_config(url), "head")
 
-    config = alembic_config(db_url)
+    def include_name(name, type_, parent_names):
+        return name in APP_SCHEMAS if type_ == "schema" else True
+
+    with engine.connect() as conn:
+        context = MigrationContext.configure(
+            conn, opts={"include_schemas": True, "include_name": include_name}
+        )
+        assert compare_metadata(context, Base.metadata) == []
+
+
+def test_migra_usuarios_del_prototipo_como_pacientes_b2c(fresh_db):
+    url, engine = fresh_db
+    config = alembic_config(url)
+    command.upgrade(config, "0001")
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO users (email, hashed_password, full_name, is_medical) VALUES "
+                "('ana@example.com', :pw, 'Ana', false), "
+                "('doc@example.com', :pw, 'Doc', true), "
+                "('rota@example.com', NULL, 'Sin password', false)"
+            ),
+            {"pw": default_password_hash()},
+        )
+        conn.execute(
+            text("INSERT INTO medical_images (user_id, image_path) VALUES (1, 'http://x/y.png')")
+        )
+
     command.upgrade(config, "head")
+
+    with engine.connect() as conn:
+        users = conn.execute(
+            text(
+                "SELECT u.email, u.role, u.hashed_password, t.slug FROM control.users u "
+                "JOIN control.tenants t ON t.id = u.tenant_id ORDER BY u.email"
+            )
+        ).all()
+        assert [(u.email, u.role, u.slug) for u in users] == [
+            ("ana@example.com", "patient", "b2c"),
+            ("doc@example.com", "patient", "b2c"),  # is_medical era autodeclarado
+        ]
+        assert all(u.hashed_password == default_password_hash() for u in users)
+        assert conn.execute(text("SELECT count(*) FROM clinical.patients")).scalar_one() == 2
+        assert conn.execute(text("SELECT count(*) FROM legacy.users")).scalar_one() == 3
+        assert conn.execute(text("SELECT count(*) FROM legacy.medical_images")).scalar_one() == 1
+    assert tables(engine, "public") == set()
+
+    # Sin datos nuevos, el downgrade devuelve las tablas a public
+    command.downgrade(config, "0004")
+    assert tables(engine, "public") == {"users", "medical_images"}
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT count(*) FROM control.users")).scalar_one() == 0
+
+
+def test_downgrade_no_borra_datos_nuevos(fresh_db):
+    url, engine = fresh_db
+    config = alembic_config(url)
     command.upgrade(config, "head")
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO control.users (email, hashed_password, full_name, role) "
+                "VALUES ('admin@example.com', 'x', 'Admin', 'platform_admin')"
+            )
+        )
 
-    assert table_names(db_url) == APP_TABLES
-
-
-def test_downgrade_no_borra_tablas_con_datos(db_url):
-    config = alembic_config(db_url)
-    command.upgrade(config, "head")
-    engine = create_engine(db_url)
-    with engine.begin() as connection:
-        connection.execute(text("INSERT INTO users (email) VALUES ('a@example.com')"))
-    engine.dispose()
-
-    with pytest.raises(RuntimeError, match="tiene datos"):
+    with pytest.raises(RuntimeError, match="creados después de migrar"):
         command.downgrade(config, "base")
-    assert table_names(db_url) == APP_TABLES
+    assert tables(engine, "control") == {"tenants", "users"}
 
 
-def test_env_no_requiere_database_url_si_recibe_dburl(db_url, monkeypatch):
+def test_env_no_requiere_database_url_si_recibe_dburl(fresh_db, monkeypatch):
+    url, engine = fresh_db
     monkeypatch.delenv("DATABASE_URL")
-    command.upgrade(alembic_config(db_url), "head")
-    assert table_names(db_url) == APP_TABLES
+    command.upgrade(alembic_config(url), "head")
+    assert tables(engine, "control") == {"tenants", "users"}

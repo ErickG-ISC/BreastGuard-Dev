@@ -1,6 +1,6 @@
 from sqlalchemy.exc import OperationalError
 
-from backend.app.api.deps import get_db
+from backend.app.api.deps import get_control_db
 from backend.app.main import app
 
 
@@ -15,7 +15,7 @@ def test_health_sin_base_503_sin_detalles(client):
         def execute(self, *args, **kwargs):
             raise OperationalError("SELECT 1", {}, Exception("host secreto:5432"))
 
-    app.dependency_overrides[get_db] = lambda: BrokenSession()
+    app.dependency_overrides[get_control_db] = lambda: BrokenSession()
 
     response = client.get("/api/v1/health")
 

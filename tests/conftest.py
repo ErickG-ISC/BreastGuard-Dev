@@ -1,25 +1,76 @@
-import os
+"""Fixtures de pruebas contra Postgres real (RLS no existe en SQLite). Ver tests/pgtest.py."""
 
-# Variables ficticias ANTES de importar la app: las pruebas nunca usan .env ni servicios reales.
-os.environ["DATABASE_URL"] = "sqlite://"
-os.environ["SECRET_KEY"] = "clave-solo-para-pruebas"
-os.environ["SUPABASE_URL"] = "http://localhost:54321"
-os.environ["SUPABASE_KEY"] = "clave-falsa"
-os.environ["SUPABASE_BUCKET"] = "bucket-de-prueba"
+from tests.pgtest import (  # isort: skip  (debe ir antes que la app: fija las variables)
+    OWNER_URL,
+    TEST_DB_NAME,
+    admin_engine,
+    alembic_config,
+    create_database,
+    drop_database,
+)
+
+import os  # noqa: E402
 
 import pytest  # noqa: E402
+from alembic import command  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
-from sqlalchemy import create_engine  # noqa: E402
-from sqlalchemy.orm import Session, sessionmaker  # noqa: E402
-from sqlalchemy.pool import StaticPool  # noqa: E402
+from sqlalchemy import create_engine, text  # noqa: E402
+from sqlalchemy.exc import OperationalError  # noqa: E402
 
-from backend.app.api.deps import get_db, get_storage  # noqa: E402
+from backend.app.api.deps import get_storage  # noqa: E402
+from backend.app.db import get_engine  # noqa: E402
 from backend.app.main import app  # noqa: E402
-from backend.app.models.base import Base  # noqa: E402
-from backend.app.models.user import User  # noqa: E402
-from backend.app.services.auth import get_password_hash  # noqa: E402
 from backend.app.services.storage import StorageError  # noqa: E402
-from tests.helpers import DEFAULT_PASSWORD  # noqa: E402
+from tests.helpers import TestUser, insert_tenant, insert_user  # noqa: E402
+
+
+@pytest.fixture(scope="session")
+def postgres_available() -> None:
+    try:
+        engine = admin_engine()
+        with engine.connect():
+            pass
+        engine.dispose()
+    except OperationalError:
+        message = "Postgres de pruebas no disponible: corre `docker compose up -d db`"
+        if os.environ.get("REQUIRE_POSTGRES"):
+            pytest.fail(message)
+        pytest.skip(message)
+
+
+@pytest.fixture(scope="session")
+def database(postgres_available):
+    """Base temporal migrada a head; se borra al terminar la sesión."""
+    create_database(TEST_DB_NAME)
+    try:
+        command.upgrade(alembic_config(os.environ["DATABASE_URL"]), "head")
+        yield
+    finally:
+        get_engine().dispose()
+        drop_database(TEST_DB_NAME)
+
+
+@pytest.fixture(scope="session")
+def owner_engine(database):
+    """Engine del DUEÑO: solo para preparar y limpiar datos de prueba, nunca para verificar RLS."""
+    engine = create_engine(OWNER_URL)
+    yield engine
+    engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+def _clean_tables(request):
+    yield
+    if "owner_engine" not in request.fixturenames:
+        return
+    engine = request.getfixturevalue("owner_engine")
+    with engine.begin() as conn:
+        conn.execute(
+            text("TRUNCATE clinical.audit_log, clinical.medical_images, clinical.patients")
+        )
+        conn.execute(text("DELETE FROM control.users"))
+        conn.execute(text("DELETE FROM control.tenants WHERE slug <> 'b2c'"))
+        conn.execute(text("UPDATE control.tenants SET is_active = true WHERE slug = 'b2c'"))
 
 
 class FakeStorage:
@@ -40,29 +91,12 @@ class FakeStorage:
 
 
 @pytest.fixture
-def db_session():
-    # Base SQLite en memoria, nueva y aislada por prueba
-    engine = create_engine(
-        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-    )
-    Base.metadata.create_all(engine)
-    testing_session = sessionmaker(bind=engine, autoflush=False)
-    session = testing_session()
-    try:
-        yield session
-    finally:
-        session.close()
-        engine.dispose()
-
-
-@pytest.fixture
 def storage() -> FakeStorage:
     return FakeStorage()
 
 
 @pytest.fixture
-def client(db_session: Session, storage: FakeStorage):
-    app.dependency_overrides[get_db] = lambda: db_session
+def client(owner_engine, storage: FakeStorage):
     app.dependency_overrides[get_storage] = lambda: storage
     with TestClient(app) as test_client:
         yield test_client
@@ -70,17 +104,28 @@ def client(db_session: Session, storage: FakeStorage):
 
 
 @pytest.fixture
-def user_factory(db_session: Session):
-    def create(email: str = "paciente@example.com", password: str = DEFAULT_PASSWORD) -> User:
-        user = User(
-            email=email,
-            hashed_password=get_password_hash(password),
-            full_name="Paciente de prueba",
-            is_medical=False,
-        )
-        db_session.add(user)
-        db_session.commit()
-        db_session.refresh(user)
-        return user
+def b2c_tenant(owner_engine):
+    with owner_engine.connect() as conn:
+        row = conn.execute(text("SELECT id, slug FROM control.tenants WHERE slug = 'b2c'")).one()
+    return row
+
+
+@pytest.fixture
+def tenant_factory(owner_engine):
+    def create(slug: str, kind: str = "institucion", active: bool = True):
+        return insert_tenant(owner_engine, slug, kind=kind, active=active)
+
+    return create
+
+
+@pytest.fixture
+def user_factory(owner_engine):
+    def create(
+        tenant=None,
+        role: str = "patient",
+        email: str | None = None,
+        active: bool = True,
+    ) -> TestUser:
+        return insert_user(owner_engine, tenant, role=role, email=email, active=active)
 
     return create
