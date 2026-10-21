@@ -8,10 +8,24 @@ from functools import lru_cache
 from PIL import Image
 from sqlalchemy import Engine, text
 
+from backend.app.content.consent import CURRENT_CONSENT_VERSION
 from backend.app.db import TenantContext, new_session
 from backend.app.services.auth import create_access_token, get_password_hash
 
 DEFAULT_PASSWORD = "contrasena-segura"
+
+
+def registration(email: str, full_name: str = "Paciente", **overrides) -> dict:
+    """Cuerpo válido de /auth/register: consentimiento vigente aceptado y plan simulado."""
+    return {
+        "email": email,
+        "password": DEFAULT_PASSWORD,
+        "full_name": full_name,
+        "consent_accepted": True,
+        "consent_version": CURRENT_CONSENT_VERSION,
+        "plan_code": "basico",
+        **overrides,
+    }
 
 
 @dataclass(frozen=True)

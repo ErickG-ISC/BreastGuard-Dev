@@ -76,8 +76,13 @@ def _clean_tables(request):
     engine = request.getfixturevalue("owner_engine")
     with engine.begin() as conn:
         conn.execute(
-            text("TRUNCATE clinical.audit_log, clinical.medical_images, clinical.patients")
+            text(
+                "TRUNCATE clinical.audit_log, clinical.questionnaires, clinical.medical_images, "
+                "clinical.patients"
+            )
         )
+        conn.execute(text("DELETE FROM control.subscriptions"))
+        conn.execute(text("DELETE FROM control.consents"))
         conn.execute(text("DELETE FROM control.users"))
         conn.execute(text("DELETE FROM control.tenants WHERE slug <> 'b2c'"))
         conn.execute(text("UPDATE control.tenants SET is_active = true WHERE slug = 'b2c'"))

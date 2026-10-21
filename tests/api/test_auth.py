@@ -6,13 +6,9 @@ from jose import jwt
 from sqlalchemy import text
 
 from backend.app.services.auth import create_access_token
-from tests.helpers import DEFAULT_PASSWORD, TestUser
+from tests.helpers import DEFAULT_PASSWORD, TestUser, registration
 
-NEW_USER = {
-    "email": "nueva@example.com",
-    "password": DEFAULT_PASSWORD,
-    "full_name": "Usuaria Nueva",
-}
+NEW_USER = registration("nueva@example.com", "Usuaria Nueva")
 
 
 def login(client, email: str, password: str = DEFAULT_PASSWORD):

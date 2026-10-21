@@ -1,10 +1,10 @@
 """Huecos señalados por la revisión de la batería de aislamiento."""
 
+import re
 import threading
 import uuid
 
 import pytest
-from fastapi.routing import APIRoute
 from sqlalchemy import text
 
 from backend.app.api.deps import get_control_db, get_tenant_db
@@ -21,24 +21,49 @@ PUBLIC_ROUTES = {
     ("GET", "/api/v1/health"),
     ("POST", "/api/v1/auth/register"),
     ("POST", "/api/v1/auth/token"),
+    ("GET", "/api/v1/consent/current"),
+    ("GET", "/api/v1/plans"),
 }
+# Guarda contra un falso verde: si la enumeración de rutas deja de funcionar, esto falla
+MIN_EXPECTED_ROUTES = 20
+
+
+def _template_regex(path: str) -> re.Pattern:
+    return re.compile("^" + re.sub(r"\{[^/]+\}", "[^/]+", path) + "$")
+
+
+def app_operations() -> list[tuple[str, str]]:
+    """Todas las rutas de la app, tomadas del esquema OpenAPI.
+
+    `app.routes` no sirve: desde FastAPI 0.15x los routers incluidos quedan envueltos y sus
+    rutas no aparecen como APIRoute (la versión anterior de esta prueba pasaba en falso).
+    """
+    schema = app.openapi()
+    return [
+        (method.upper(), path)
+        for path, item in schema["paths"].items()
+        for method in item
+        if method.upper() in {"GET", "POST", "PUT", "PATCH", "DELETE"}
+    ]
 
 
 def test_todo_endpoint_es_publico_declarado_o_esta_en_la_matriz_cruzada():
     """Un endpoint nuevo sin pruebas de 401/403/acceso cruzado hace fallar esta prueba."""
+    operations = app_operations()
+    assert len(operations) >= MIN_EXPECTED_ROUTES
     uncovered = []
-    for route in app.routes:
-        if not isinstance(route, APIRoute):
+    for method, path in operations:
+        if (method, path) in PUBLIC_ROUTES:
             continue
-        for method in route.methods - {"HEAD", "OPTIONS"}:
-            if (method, route.path) in PUBLIC_ROUTES:
-                continue
-            covered = any(
-                m == method and route.path_regex.match(path) for m, path, _ in PROTECTED.values()
-            )
-            if not covered:
-                uncovered.append(f"{method} {route.path}")
+        pattern = _template_regex(path)
+        if not any(m == method and pattern.match(p) for m, p, _ in PROTECTED.values()):
+            uncovered.append(f"{method} {path}")
     assert uncovered == []
+
+
+def test_las_rutas_publicas_declaradas_existen():
+    operations = set(app_operations())
+    assert PUBLIC_ROUTES - {("GET", "/")} <= operations
 
 
 class TestSesionesDeLaApp:

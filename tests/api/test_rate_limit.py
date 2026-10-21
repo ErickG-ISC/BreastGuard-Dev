@@ -1,4 +1,4 @@
-from tests.helpers import DEFAULT_PASSWORD
+from tests.helpers import DEFAULT_PASSWORD, registration
 
 
 def test_login_limitado_a_10_por_minuto(client):
@@ -12,11 +12,11 @@ def test_registro_limitado_con_retry_after(client):
     for i in range(5):
         client.post(
             "/api/v1/auth/register",
-            json={"email": f"p{i}@example.com", "password": DEFAULT_PASSWORD, "full_name": "P"},
+            json=registration(f"p{i}@example.com"),
         )
     response = client.post(
         "/api/v1/auth/register",
-        json={"email": "p9@example.com", "password": DEFAULT_PASSWORD, "full_name": "P"},
+        json=registration("p9@example.com"),
     )
     assert response.status_code == 429
     assert int(response.headers["Retry-After"]) >= 1
@@ -28,6 +28,6 @@ def test_los_limites_son_por_ruta(client):
         client.post("/api/v1/auth/token", data=form)
     response = client.post(
         "/api/v1/auth/register",
-        json={"email": "nueva@example.com", "password": DEFAULT_PASSWORD, "full_name": "N"},
+        json=registration("nueva@example.com"),
     )
     assert response.status_code == 201

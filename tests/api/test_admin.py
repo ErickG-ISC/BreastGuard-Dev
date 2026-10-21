@@ -183,7 +183,12 @@ class TestChequeoDeAislamiento:
         assert report["tenant_has_witness_rows"] is True
         assert report["conclusive"] is True
         assert report["other_tenants_checked"] >= 1
-        assert set(report["tables_checked"]) == {"patients", "medical_images", "audit_log"}
+        assert set(report["tables_checked"]) == {
+            "patients",
+            "medical_images",
+            "audit_log",
+            "questionnaires",
+        }
 
     def test_no_deja_rastro(self, client, root, owner_engine):
         tenant_id = create(client, root).json()["tenant"]["id"]

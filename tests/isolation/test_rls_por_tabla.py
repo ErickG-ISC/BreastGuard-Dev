@@ -102,6 +102,24 @@ def _insert_audit(conn, tenant_id, actor, parents, overrides):
     return values["id"]
 
 
+def _insert_questionnaire(conn, tenant_id, actor, parents, overrides):
+    values = {"id": uuid.uuid4(), "patient_id": parents["patient_id"], **overrides}
+    columns = ["id", "patient_id", "version", "answers", "risk_factors", "summary_level"]
+    binds = [":id", ":patient_id", "'v1'", "'{}'::jsonb", "'[]'::jsonb", "'sin_factores'"]
+    if tenant_id is not None:
+        columns.append("tenant_id")
+        binds.append(":tenant_id")
+        values["tenant_id"] = tenant_id
+    conn.execute(
+        text(
+            f"INSERT INTO clinical.questionnaires ({', '.join(columns)}) "
+            f"VALUES ({', '.join(binds)})"
+        ),
+        values,
+    )
+    return values["id"]
+
+
 def _patient_parent(conn, tenant_id, actor):
     return {"patient_id": _insert_patient(conn, tenant_id, actor, {}, {})}
 
@@ -121,6 +139,17 @@ RECIPES: dict[str, Recipe] = {
         update_value="'cambiado'",
         cross_fk={
             "fk_medical_images_patient": lambda seed_b, world: {
+                "patient_id": seed_b.parents["patient_id"]
+            }
+        },
+    ),
+    "questionnaires": Recipe(
+        parents=_patient_parent,
+        insert=_insert_questionnaire,
+        update_column="summary_level",
+        update_value="'cambiado'",
+        cross_fk={
+            "fk_questionnaires_patient": lambda seed_b, world: {
                 "patient_id": seed_b.parents["patient_id"]
             }
         },

@@ -12,7 +12,7 @@ import pytest
 from sqlalchemy import text
 
 from backend.app.services.auth import create_access_token
-from tests.helpers import DEFAULT_PASSWORD, auth_headers, make_image_bytes
+from tests.helpers import DEFAULT_PASSWORD, auth_headers, make_image_bytes, registration
 
 API = "/api/v1"
 NEW_TENANT = {
@@ -51,7 +51,24 @@ PROTECTED = {
     "admin_create_user": ("POST", f"{API}/admin/tenants/{SOME_ID}/users", {"json": NEW_STAFF}),
     "admin_update_user": ("PATCH", f"{API}/admin/users/{SOME_ID}", {"json": {"is_active": False}}),
     "admin_isolation_check": ("POST", f"{API}/admin/tenants/{SOME_ID}/isolation-check", {}),
+    # CU-01 (solo pacientes)
+    "subscription_get": ("GET", f"{API}/subscription/me", {}),
+    "subscription_put": ("PUT", f"{API}/subscription/me", {"json": {"plan_code": "plus"}}),
+    "questionnaire_definition": ("GET", f"{API}/questionnaire/current", {}),
+    "questionnaire_submit": (
+        "POST",
+        f"{API}/questionnaires",
+        {"json": {"version": "v1", "answers": {}}},
+    ),
+    "questionnaire_latest": ("GET", f"{API}/questionnaires/latest", {}),
 }
+PATIENT_ONLY_ENDPOINTS = [
+    "subscription_get",
+    "subscription_put",
+    "questionnaire_definition",
+    "questionnaire_submit",
+    "questionnaire_latest",
+]
 ADMIN_ENDPOINTS = [name for name in PROTECTED if name.startswith("admin_")]
 
 
@@ -127,8 +144,15 @@ class TestRolesEnTodosLosEndpoints:
         a, _ = two_clinics
         assert call(client, name, headers=auth_headers(a[role])).status_code == 403
 
+    @pytest.mark.parametrize("name", PATIENT_ONLY_ENDPOINTS)
+    @pytest.mark.parametrize("role", ["doctor", "admin"])
+    def test_endpoints_de_paciente_rechazan_al_personal(self, client, two_clinics, name, role):
+        a, _ = two_clinics
+        assert call(client, name, headers=auth_headers(a[role])).status_code == 403
+
     @pytest.mark.parametrize(
-        "name", ["images_list", "images_detail", "images_upload", "audit_list"]
+        "name",
+        ["images_list", "images_detail", "images_upload", "audit_list", *PATIENT_ONLY_ENDPOINTS],
     )
     def test_platform_admin_no_toca_datos_clinicos(self, client, user_factory, name):
         admin = user_factory(role="platform_admin")
@@ -188,7 +212,7 @@ class TestTenantIdDelClienteSeIgnora:
         response = client.post(
             f"{API}/auth/register",
             params={"tenant_id": str(b["tenant"].id)},
-            json={"email": "nueva@example.com", "password": DEFAULT_PASSWORD, "full_name": "Ana"},
+            json=registration("nueva@example.com", "Ana"),
             headers={"X-Tenant-Id": str(b["tenant"].id)},
         )
         assert response.status_code == 201

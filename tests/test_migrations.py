@@ -20,6 +20,8 @@ from tests.pgtest import (
 )
 
 APP_SCHEMAS = {"control", "clinical"}
+CONTROL_TABLES = {"tenants", "users", "consents", "plans", "subscriptions"}
+CLINICAL_TABLES = {"patients", "medical_images", "audit_log", "questionnaires"}
 
 
 @pytest.fixture
@@ -45,15 +47,15 @@ def test_upgrade_downgrade_upgrade(fresh_db):
     config = alembic_config(url)
 
     command.upgrade(config, "head")
-    assert tables(engine, "control") == {"tenants", "users"}
-    assert tables(engine, "clinical") == {"patients", "medical_images", "audit_log"}
+    assert tables(engine, "control") == CONTROL_TABLES
+    assert tables(engine, "clinical") == CLINICAL_TABLES
 
     command.downgrade(config, "base")
     assert not inspect(engine).has_schema("clinical")
     assert tables(engine, "public") == set()
 
     command.upgrade(config, "head")
-    assert tables(engine, "clinical") == {"patients", "medical_images", "audit_log"}
+    assert tables(engine, "clinical") == CLINICAL_TABLES
 
 
 def test_upgrade_head_dos_veces_es_idempotente(fresh_db):
@@ -136,14 +138,14 @@ def test_downgrade_no_borra_datos_nuevos(fresh_db):
 
     with pytest.raises(RuntimeError, match="creados después de migrar"):
         command.downgrade(config, "base")
-    assert tables(engine, "control") == {"tenants", "users"}
+    assert tables(engine, "control") == CONTROL_TABLES
 
 
 def test_env_no_requiere_database_url_si_recibe_dburl(fresh_db, monkeypatch):
     url, engine = fresh_db
     monkeypatch.delenv("DATABASE_URL")
     command.upgrade(alembic_config(url), "head")
-    assert tables(engine, "control") == {"tenants", "users"}
+    assert tables(engine, "control") == CONTROL_TABLES
 
 
 def test_downgrade_no_borra_datos_clinicos(fresh_db):
@@ -162,4 +164,4 @@ def test_downgrade_no_borra_datos_clinicos(fresh_db):
 
     with pytest.raises(RuntimeError, match="tiene datos"):
         command.downgrade(config, "0003")
-    assert tables(engine, "clinical") == {"patients", "medical_images", "audit_log"}
+    assert tables(engine, "clinical") == CLINICAL_TABLES
