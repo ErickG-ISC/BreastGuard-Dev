@@ -31,6 +31,13 @@ class UserOut(BaseModel):
     tenant_id: uuid.UUID | None
 
 
+class MeOut(BaseModel):
+    user_id: uuid.UUID
+    tenant_id: uuid.UUID | None
+    tenant_slug: str | None
+    role: str
+
+
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"

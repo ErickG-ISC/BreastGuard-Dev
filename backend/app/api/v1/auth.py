@@ -3,8 +3,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 
-from backend.app.api.deps import ControlDb
-from backend.app.schemas.auth import Token, UserCreate, UserOut
+from backend.app.api.deps import ControlDb, CurrentUser
+from backend.app.schemas.auth import MeOut, Token, UserCreate, UserOut
 from backend.app.services.auth import (
     EmailAlreadyRegisteredError,
     InactiveAccountError,
@@ -47,3 +47,10 @@ def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()], db: Contro
             headers={"WWW-Authenticate": "Bearer"},
         )
     return Token(access_token=create_access_token(user))
+
+
+@router.get("/me", response_model=MeOut)
+def me(auth: CurrentUser):
+    return MeOut(
+        user_id=auth.user_id, tenant_id=auth.tenant_id, tenant_slug=auth.tenant_slug, role=auth.role
+    )
