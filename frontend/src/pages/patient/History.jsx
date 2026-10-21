@@ -19,7 +19,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import { api, errorMessage } from '../../api/client';
 import Layout from '../../components/Layout';
-import { CLASS_LABELS, LEVEL_SEVERITY, formatDate } from './analysisLabels';
+import { LEVEL_SEVERITY, formatDate, resultLabel } from './analysisLabels';
 
 const PAGE = 10;
 
@@ -73,6 +73,9 @@ export default function History() {
           </Button>
         </Stack>
         {error && <Alert severity="error">{error}</Alert>}
+        {page.items.find((item) => item.report.demo_notice) && (
+          <Alert severity="warning">{page.items.find((item) => item.report.demo_notice).report.demo_notice}</Alert>
+        )}
         {loading ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
             <CircularProgress />
@@ -90,7 +93,7 @@ export default function History() {
                   {item.report.title}
                 </Typography>
                 <Stack direction="row" sx={{ gap: 1, flexWrap: 'wrap', mt: 1 }}>
-                  <Chip size="small" color={LEVEL_SEVERITY[item.report.level] ?? 'default'} label={CLASS_LABELS[item.predicted_class] ?? item.predicted_class} />
+                  <Chip size="small" color={LEVEL_SEVERITY[item.report.level] ?? 'default'} label={resultLabel(item)} />
                   <Chip size="small" variant="outlined" label={`Confianza ${item.report.confidence_words}`} />
                 </Stack>
               </CardContent>

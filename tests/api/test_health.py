@@ -21,3 +21,8 @@ def test_health_sin_base_503_sin_detalles(client):
 
     assert response.status_code == 503
     assert "secreto" not in response.text
+
+
+def test_la_api_no_permite_cache_http(client):
+    response = client.get("/api/v1/health")
+    assert response.headers["cache-control"] == "no-store"
