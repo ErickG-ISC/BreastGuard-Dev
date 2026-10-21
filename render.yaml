@@ -1,0 +1,40 @@
+# Blueprint de Render para el backend (docs/despliegue.md).
+# Los secretos NO van aquí: se cargan en el panel de Render (sync: false).
+services:
+  - type: web
+    name: breastguard-api
+    runtime: python
+    plan: free
+    region: virginia # cerca de Supabase us-east-1
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/v1/health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      # Rol dueño SIN contraseña: la app solo toma host, base y sufijo del usuario del pooler
+      # (Transaction pooler, puerto 6543). La contraseña de la app va en APP_DB_PASSWORD.
+      - key: DATABASE_URL
+        sync: false
+      - key: APP_DB_PASSWORD
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: SUPABASE_BUCKET
+        value: medical_images
+      - key: FRONTEND_ORIGIN
+        sync: false
+      - key: MODEL_BUCKET
+        value: ml-models
+      - key: MODEL_PREFIX
+        value: demo-effb0-untrained-1
+      - key: MAX_CONCURRENT_INFERENCES
+        value: "1"
+      # Render agrega la IP del cliente al final de X-Forwarded-For (ADR 0004)
+      - key: TRUSTED_PROXY_HOPS
+        value: "1"

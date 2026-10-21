@@ -1,0 +1,38 @@
+# Despliegue de prueba (Render + Vercel)
+
+El backend va en **Render** (plan gratuito, unos 512 MB) y el frontend en **Vercel**. La base de datos y Storage están en **Supabase**. Nada de esto requiere commitear secretos.
+
+## 0. Antes de desplegar (una vez, desde tu computadora)
+1. Migra la base, siempre a mano y nunca en el build de Render: `alembic -c backend/alembic.ini upgrade head`.
+2. Revisa en Supabase que tanto `medical_images` como `ml-models` sean buckets **privados**. Para el primero puedes usar `python -m backend.scripts.check_storage`.
+3. Si el modelo aún no está en el bucket, súbelo: `python -m backend.ml_tools.upload_model --model-dir <carpeta>`.
+
+## 1. Backend en Render
+1. En Render: **New → Blueprint** y elige el repo. Render lee `render.yaml`.
+2. Carga los valores marcados `sync: false`:
+   | Variable | Valor |
+   |---|---|
+   | `DATABASE_URL` | La cadena del **Transaction pooler** (puerto 6543) **sin la contraseña**: `postgresql://postgres.<ref>@aws-0-us-east-1.pooler.supabase.com:6543/postgres`. La app solo usa host, base y sufijo `.<ref>`, y se conecta como `app_user`. |
+   | `APP_DB_PASSWORD` | La misma que usaste al migrar. |
+   | `SUPABASE_URL` / `SUPABASE_KEY` | Project Settings → API (llave `service_role`, solo en el backend). |
+   | `FRONTEND_ORIGIN` | `https://<tu-app>.vercel.app` (con `https://`). |
+3. Despliega. El primer arranque descarga el modelo (unos 16 MB) del bucket privado.
+4. Verifica: `https://<tu-api>.onrender.com/api/v1/health` debe responder `{"status":"ok","database":"connected","model":"loaded"}`.
+5. Mide la RAM: en Render → **Metrics → Memory**, después de un análisis. En Docker con 512 MB se midió un pico de 184 MB (ADR 0006).
+
+La app **no arranca** si `DATABASE_URL` trae un rol con BYPASSRLS y falta `APP_DB_PASSWORD`: es intencional.
+
+## 2. Frontend en Vercel
+1. **Add New → Project** y elige el repo, con **Root Directory** `frontend`. Framework: Vite.
+2. Variable de entorno: `VITE_API_URL=https://<tu-api>.onrender.com/api/v1`.
+3. Despliega. `vercel.json` reescribe todas las rutas a `index.html`, que es una SPA.
+4. Vuelve a Render y confirma que `FRONTEND_ORIGIN` coincide exactamente con el dominio de Vercel.
+
+## 3. Primer usuario administrador
+Desde tu computadora, con el `.env` apuntando a la misma base:
+`python -m backend.scripts.create_platform_admin --email tu@correo.com --name "Tu nombre"`
+
+## Problemas comunes
+- **`model: unavailable` en `/health`:** el bucket o el prefijo están mal, o el modelo no se subió. Revisa los logs de Render; solo registran el tipo de error.
+- **Error de CORS en el navegador:** `FRONTEND_ORIGIN` no coincide con el dominio exacto de Vercel.
+- **El primer request tarda ~1 min:** el plan gratuito duerme. Despiértalo antes de la demo.
