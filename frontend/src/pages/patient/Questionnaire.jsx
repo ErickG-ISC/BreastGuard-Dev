@@ -102,7 +102,13 @@ export function QuestionnaireResult({ result }) {
           </Typography>
           <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 1, mt: 1 }}>
             {result.factors.map((factor) => (
-              <Chip key={factor.code} label={factor.label} color={factor.kind === 'symptom' ? 'warning' : 'default'} />
+              <Chip
+                key={factor.code}
+                label={factor.label}
+                color={factor.kind === 'symptom' ? 'warning' : 'default'}
+                // Etiquetas largas: que ajusten línea en el celular en lugar de cortarse
+                sx={{ height: 'auto', maxWidth: '100%', '& .MuiChip-label': { whiteSpace: 'normal', py: 0.75 } }}
+              />
             ))}
           </Stack>
         </Box>
