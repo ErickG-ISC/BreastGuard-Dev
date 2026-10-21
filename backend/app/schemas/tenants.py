@@ -5,6 +5,9 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 SLUG_PATTERN = r"^[a-z0-9][a-z0-9-]{1,40}$"
+# Prefijos de Storage o nombres que no pueden ser de un tenant institucional
+RESERVED_SLUGS = {"b2c", "uploads", "admin", "api", "legacy", "public", "control", "clinical"}
+STAFF_PASSWORD_MIN = 12
 
 
 def _bcrypt_limit(value: str) -> str:
@@ -23,9 +26,16 @@ class TenantCreate(BaseModel):
     plan: str = Field(default="basic", min_length=1, max_length=50)
     admin_email: EmailStr
     admin_full_name: str = Field(min_length=1, max_length=200)
-    admin_password: str = Field(min_length=8)
+    admin_password: str = Field(min_length=STAFF_PASSWORD_MIN)
 
     _check_password = field_validator("admin_password")(_bcrypt_limit)
+
+    @field_validator("slug")
+    @classmethod
+    def slug_not_reserved(cls, value: str) -> str:
+        if value in RESERVED_SLUGS:
+            raise ValueError("Ese slug está reservado")
+        return value
 
 
 class TenantOut(BaseModel):
@@ -58,7 +68,7 @@ class TenantUserCreate(BaseModel):
 
     email: EmailStr
     full_name: str = Field(min_length=1, max_length=200)
-    password: str = Field(min_length=8)
+    password: str = Field(min_length=STAFF_PASSWORD_MIN)
     role: Literal["tenant_admin", "doctor"]
 
     _check_password = field_validator("password")(_bcrypt_limit)
@@ -83,7 +93,9 @@ class IsolationReport(BaseModel):
     rows_visible_without_context: int
     foreign_rows_visible_to_tenant: int
     tenant_rows_visible_to_others: int
-    tenant_witness_rows: int
+    tenant_has_witness_rows: bool
     other_tenants_checked: int
     tables_checked: list[str]
+    # Solo es concluyente si hay filas testigo, tablas y otros tenants contra quienes comparar
+    conclusive: bool
     passed: bool

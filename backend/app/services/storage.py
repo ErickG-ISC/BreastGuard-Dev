@@ -1,10 +1,13 @@
 import logging
 import os
+import re
 from functools import lru_cache
 
 from supabase import Client, create_client
 
 logger = logging.getLogger(__name__)
+
+LIST_PAGE_SIZE = 100
 
 
 class StorageError(Exception):
@@ -39,20 +42,27 @@ class SupabaseStorage:
 
     def remove_prefix(self, prefix: str) -> int:
         """Borra todos los objetos bajo un prefijo de tenant (`{slug}/`). Solo para la purga."""
-        if not prefix.endswith("/") or prefix.count("/") != 1:
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,40}/", prefix):
             raise ValueError("El prefijo debe ser exactamente '{slug}/'")
         bucket = _get_client().storage.from_(self.bucket)
         paths: list[str] = []
         pending = [prefix.rstrip("/")]
         while pending:
             folder = pending.pop()
-            for entry in bucket.list(folder):
-                path = f"{folder}/{entry['name']}"
-                # En Supabase, las "carpetas" se listan sin id
-                if entry.get("id") is None:
-                    pending.append(path)
-                else:
-                    paths.append(path)
+            offset = 0
+            while True:
+                # Supabase pagina el listado (100 por defecto): recorrer todas las páginas
+                page = bucket.list(folder, {"limit": LIST_PAGE_SIZE, "offset": offset})
+                for entry in page:
+                    path = f"{folder}/{entry['name']}"
+                    # En Supabase, las "carpetas" se listan sin id
+                    if entry.get("id") is None:
+                        pending.append(path)
+                    else:
+                        paths.append(path)
+                if len(page) < LIST_PAGE_SIZE:
+                    break
+                offset += LIST_PAGE_SIZE
         for start in range(0, len(paths), 100):
             bucket.remove(paths[start : start + 100])
         return len(paths)

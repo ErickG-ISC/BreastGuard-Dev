@@ -53,6 +53,10 @@ def update_tenant(
         return service.set_tenant_active(db, auth, tenant_id, data.is_active, _client_ip(request))
     except service.NotFoundError:
         raise _not_found() from None
+    except service.InvalidOperationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from None
 
 
 @router.post(

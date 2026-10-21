@@ -95,10 +95,17 @@ class TestCrearTenant:
         )
 
     def test_fallo_a_mitad_no_deja_nada(self, client, root, owner_engine, monkeypatch):
-        def boom(*args, **kwargs):
-            raise RuntimeError("fallo simulado en la auditoría")
+        # Falla en la SEGUNDA auditoría: tenant, admin y la primera fila ya se escribieron
+        real_record = audit.record
+        calls = []
 
-        monkeypatch.setattr(audit, "record", boom)
+        def fail_on_second(*args, **kwargs):
+            calls.append(kwargs["action"])
+            if len(calls) == 2:
+                raise RuntimeError("fallo simulado en la auditoría")
+            real_record(*args, **kwargs)
+
+        monkeypatch.setattr(audit, "record", fail_on_second)
         with pytest.raises(RuntimeError, match="fallo simulado"):
             create(client, root)
 
@@ -118,6 +125,32 @@ class TestCrearTenant:
             )
             == 0
         )
+        assert calls == ["tenant.create", "user.create"]
+        assert scalar(owner_engine, "SELECT count(*) FROM clinical.audit_log") == 0
+
+    def test_carrera_de_email_409_sin_dejar_nada(self, client, root, owner_engine, monkeypatch):
+        # Simula que otro proceso registró el email entre la verificación y el INSERT
+        from backend.app.services import tenants as tenants_service
+
+        monkeypatch.setattr(tenants_service, "get_user_by_email", lambda db, email: None)
+        response = create(client, root, admin_email=root.email)
+
+        assert response.status_code == 409
+        assert (
+            scalar(
+                owner_engine,
+                "SELECT count(*) FROM control.tenants WHERE slug = :s",
+                s="clinica-norte",
+            )
+            == 0
+        )
+
+    @pytest.mark.parametrize("slug", ["b2c", "uploads", "admin", "legacy"])
+    def test_slug_reservado_422(self, client, root, slug):
+        assert create(client, root, slug=slug).status_code == 422
+
+    def test_contrasena_corta_para_personal_422(self, client, root):
+        assert create(client, root, admin_password="corta-11ch").status_code == 422
 
     @pytest.mark.parametrize(
         "overrides",
@@ -147,7 +180,8 @@ class TestChequeoDeAislamiento:
         assert report["rows_visible_without_context"] == 0
         assert report["foreign_rows_visible_to_tenant"] == 0
         assert report["tenant_rows_visible_to_others"] == 0
-        assert report["tenant_witness_rows"] >= 1
+        assert report["tenant_has_witness_rows"] is True
+        assert report["conclusive"] is True
         assert report["other_tenants_checked"] >= 1
         assert set(report["tables_checked"]) == {"patients", "medical_images", "audit_log"}
 
@@ -158,6 +192,38 @@ class TestChequeoDeAislamiento:
             f"/api/v1/admin/tenants/{tenant_id}/isolation-check", headers=auth_headers(root)
         )
         assert scalar(owner_engine, "SELECT count(*) FROM clinical.audit_log") == before
+
+    def test_detecta_una_fuga_si_rls_se_desactiva(
+        self, client, root, user_factory, b2c_tenant, owner_engine
+    ):
+        user_factory(b2c_tenant, role="patient")
+        tenant_id = create(client, root).json()["tenant"]["id"]
+        with owner_engine.begin() as conn:
+            conn.execute(text("ALTER TABLE clinical.patients DISABLE ROW LEVEL SECURITY"))
+        try:
+            report = client.post(
+                f"/api/v1/admin/tenants/{tenant_id}/isolation-check", headers=auth_headers(root)
+            ).json()
+        finally:
+            with owner_engine.begin() as conn:
+                conn.execute(text("ALTER TABLE clinical.patients ENABLE ROW LEVEL SECURITY"))
+        assert report["passed"] is False
+        assert report["foreign_rows_visible_to_tenant"] > 0
+
+    def test_corre_en_transaccion_de_solo_lectura(self, client, root, monkeypatch):
+        from backend.app.services import tenants as tenants_service
+
+        tenant_id = create(client, root).json()["tenant"]["id"]
+
+        def write_attempt(db, table, where, **params):
+            db.execute(text("UPDATE control.tenants SET plan = plan"))
+            return 0
+
+        monkeypatch.setattr(tenants_service, "_count", write_attempt)
+        with pytest.raises(Exception, match="read-only"):
+            client.post(
+                f"/api/v1/admin/tenants/{tenant_id}/isolation-check", headers=auth_headers(root)
+            )
 
     def test_tenant_inexistente_404(self, client, root):
         response = client.post(
@@ -260,11 +326,79 @@ class TestUsuariosYActivacion:
         )
         assert response.status_code == 404
 
+    def test_no_desactiva_b2c(self, client, root, b2c_tenant):
+        response = client.patch(
+            f"/api/v1/admin/tenants/{b2c_tenant.id}",
+            json={"is_active": False},
+            headers=auth_headers(root),
+        )
+        assert response.status_code == 422
+
+    def test_desactivacion_queda_auditada_en_el_tenant(
+        self, client, root, tenant_factory, owner_engine
+    ):
+        tenant = tenant_factory("clinica-a")
+        client.patch(
+            f"/api/v1/admin/tenants/{tenant.id}",
+            json={"is_active": False},
+            headers=auth_headers(root),
+        )
+        count = scalar(
+            owner_engine,
+            "SELECT count(*) FROM clinical.audit_log WHERE tenant_id = :t "
+            "AND action = 'tenant.deactivate' AND actor_id = :a",
+            t=tenant.id,
+            a=root.id,
+        )
+        assert count == 1
+
     def test_listar_tenants(self, client, root, tenant_factory):
         tenant_factory("clinica-a")
         response = client.get("/api/v1/admin/tenants", headers=auth_headers(root))
         assert response.status_code == 200
         assert {t["slug"] for t in response.json()} >= {"b2c", "clinica-a"}
+
+
+class TestAccesoCruzadoDeAdministracion:
+    """Un tenant_admin (o doctor) de A no usa la administración de plataforma contra B."""
+
+    @pytest.fixture
+    def setup(self, tenant_factory, user_factory):
+        a, b = tenant_factory("clinica-a"), tenant_factory("clinica-b")
+        return {
+            "a_admin": user_factory(a, role="tenant_admin"),
+            "a_doctor": user_factory(a, role="doctor"),
+            "b": b,
+            "b_doctor": user_factory(b, role="doctor"),
+        }
+
+    @pytest.mark.parametrize("actor", ["a_admin", "a_doctor"])
+    def test_403_en_todos_los_endpoints(self, client, setup, actor, owner_engine):
+        headers = auth_headers(setup[actor])
+        b, b_doctor = setup["b"], setup["b_doctor"]
+        new_user = {
+            "email": "intruso@x.com",
+            "full_name": "X",
+            "password": DEFAULT_PASSWORD,
+            "role": "tenant_admin",
+        }
+        calls = [
+            client.get("/api/v1/admin/tenants", headers=headers),
+            client.patch(
+                f"/api/v1/admin/tenants/{b.id}", json={"is_active": False}, headers=headers
+            ),
+            client.post(f"/api/v1/admin/tenants/{b.id}/users", json=new_user, headers=headers),
+            client.patch(
+                f"/api/v1/admin/users/{b_doctor.id}", json={"is_active": False}, headers=headers
+            ),
+        ]
+        assert [c.status_code for c in calls] == [403, 403, 403, 403]
+        active = scalar(owner_engine, "SELECT is_active FROM control.tenants WHERE id = :t", t=b.id)
+        assert active is True
+        intruders = scalar(
+            owner_engine, "SELECT count(*) FROM control.users WHERE email = 'intruso@x.com'"
+        )
+        assert intruders == 0
 
 
 def test_me_devuelve_el_contexto(client, user_factory, tenant_factory):

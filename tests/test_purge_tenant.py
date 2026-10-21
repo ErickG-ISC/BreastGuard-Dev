@@ -3,6 +3,8 @@
 import pytest
 from sqlalchemy import text
 
+from backend.app.db import get_engine
+from backend.app.services import storage as storage_module
 from backend.scripts.purge_tenant import PurgeError, purge_tenant
 
 
@@ -69,3 +71,76 @@ def test_b2c_requiere_confirmacion_extra(owner_engine):
 def test_tenant_inexistente(owner_engine):
     with pytest.raises(PurgeError, match="No existe"):
         purge_tenant(owner_engine, "no-existe")
+
+
+def test_purga_borra_imagenes_y_conserva_platform_admins(populated, owner_engine, user_factory):
+    a = populated["clinica-a"]
+    root = user_factory(role="platform_admin")
+    with owner_engine.begin() as conn:
+        patient_id = conn.execute(
+            text("SELECT id FROM clinical.patients WHERE tenant_id = :t"), {"t": a.id}
+        ).scalar_one()
+        conn.execute(
+            text(
+                "INSERT INTO clinical.medical_images (tenant_id, patient_id, uploaded_by, "
+                "object_path, image_type) VALUES (:t, :p, :u, 'clinica-a/images/x.png', 'BUSI')"
+            ),
+            {"t": a.id, "p": patient_id, "u": root.id},
+        )
+
+    summary = purge_tenant(owner_engine, "clinica-a")
+
+    assert summary.deleted["clinical.medical_images"] == 1
+    with owner_engine.connect() as conn:
+        kept = conn.execute(
+            text("SELECT count(*) FROM control.users WHERE id = :id"), {"id": root.id}
+        ).scalar_one()
+    assert kept == 1
+
+
+def test_purga_exige_bypassrls(populated):
+    with pytest.raises(PurgeError, match="BYPASSRLS"):
+        purge_tenant(get_engine(), "clinica-a")
+
+
+class FakeBucket:
+    def __init__(self, folders: dict[str, list[str]], files: dict[str, list[str]]) -> None:
+        self.folders = folders
+        self.files = files
+        self.removed: list[str] = []
+
+    def list(self, folder, options):
+        entries = [{"name": n, "id": None} for n in self.folders.get(folder, [])]
+        entries += [{"name": n, "id": "x"} for n in self.files.get(folder, [])]
+        start = options["offset"]
+        return entries[start : start + options["limit"]]
+
+    def remove(self, paths):
+        self.removed.extend(paths)
+
+
+class FakeClient:
+    def __init__(self, bucket) -> None:
+        self.storage = self
+        self._bucket = bucket
+
+    def from_(self, name):
+        return self._bucket
+
+
+def test_remove_prefix_pagina_y_recorre_subcarpetas(monkeypatch):
+    names = [f"img{i}.png" for i in range(250)]
+    bucket = FakeBucket({"clinica-a": ["images"]}, {"clinica-a/images": names})
+    monkeypatch.setattr(storage_module, "_get_client", lambda: FakeClient(bucket))
+
+    removed = storage_module.SupabaseStorage(bucket="b").remove_prefix("clinica-a/")
+
+    assert removed == 250
+    assert len(set(bucket.removed)) == 250
+    assert all(p.startswith("clinica-a/images/") for p in bucket.removed)
+
+
+@pytest.mark.parametrize("prefix", ["", "/", "a/b/", "clinica-a", "../x/", "Mayus/"])
+def test_remove_prefix_rechaza_prefijos_peligrosos(prefix):
+    with pytest.raises(ValueError):
+        storage_module.SupabaseStorage(bucket="b").remove_prefix(prefix)

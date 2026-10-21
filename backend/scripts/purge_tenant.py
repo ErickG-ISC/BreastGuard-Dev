@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 
 from dotenv import load_dotenv
 from sqlalchemy import Connection, Engine, create_engine, text
+from sqlalchemy.engine import make_url
 
 # Orden de borrado (hijas antes que padres). Si aparece una tabla clínica nueva, la purga se
 # detiene hasta que se agregue aquí: así nunca deja filas huérfanas de un tenant.
@@ -103,6 +104,8 @@ def main() -> int:
     parser.add_argument("--keep-files", action="store_true", help="No borra objetos de Storage")
     args = parser.parse_args()
 
+    target = make_url(os.environ["DATABASE_URL"])
+    print(f"Base de destino: {target.host}:{target.port}/{target.database}")
     if not args.dry_run:
         typed = input(
             f"Esto borra TODOS los datos de {args.slug!r}. Escribe el slug para confirmar: "
@@ -126,7 +129,15 @@ def main() -> int:
     if not args.dry_run and not args.keep_files:
         from backend.app.services.storage import SupabaseStorage
 
-        removed = SupabaseStorage().remove_prefix(f"{args.slug}/")
+        try:
+            removed = SupabaseStorage().remove_prefix(f"{args.slug}/")
+        except Exception as exc:
+            print(
+                f"La base quedó purgada, pero falló Storage ({type(exc).__name__}). "
+                f"Quedan objetos bajo {args.slug}/: bórralos desde Supabase > Storage.",
+                file=sys.stderr,
+            )
+            return 2
         print(f"Borrados {removed} objetos de Storage bajo {args.slug}/")
     return 0
 

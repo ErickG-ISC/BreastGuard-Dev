@@ -100,6 +100,9 @@ def set_tenant_active(
     tenant = db.get(Tenant, tenant_id)
     if tenant is None:
         raise NotFoundError
+    if tenant.kind == "b2c" and not active:
+        # Bloquearía a todas las pacientes y el registro público
+        raise InvalidOperationError("El tenant b2c no se desactiva desde la API")
     tenant.is_active = active
     db.flush()
     action = "tenant.activate" if active else "tenant.deactivate"
@@ -222,14 +225,22 @@ def isolation_check(actor: AuthContext, tenant_id: uuid.UUID) -> IsolationReport
             db.rollback()
 
     safe_role = not (role.rolsuper or role.rolbypassrls)
+    conclusive = witness > 0 and bool(tables) and len(others) > 0
     return IsolationReport(
         tenant_slug=slug,
         app_role_without_bypass=safe_role,
         rows_visible_without_context=without_context,
         foreign_rows_visible_to_tenant=foreign,
         tenant_rows_visible_to_others=seen_by_others,
-        tenant_witness_rows=witness,
+        tenant_has_witness_rows=witness > 0,
         other_tenants_checked=len(others),
         tables_checked=tables,
-        passed=safe_role and without_context == 0 and foreign == 0 and seen_by_others == 0,
+        conclusive=conclusive,
+        passed=(
+            conclusive
+            and safe_role
+            and without_context == 0
+            and foreign == 0
+            and seen_by_others == 0
+        ),
     )
