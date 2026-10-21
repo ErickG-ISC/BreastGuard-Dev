@@ -19,8 +19,13 @@ Prioridad de implementación acordada: **1) multitenencia (CU-12, CU-13), 2) B2C
 
 - `backend/` — app FastAPI (`backend/app`)
 - `frontend/` — SPA React 19 + Vite
-- `infraestructure/` — vacío, reservado para despliegue/IaC (el nombre tiene ese typo a propósito; no renombrar sin avisar)
-- `docs/` — casos de uso, decisiones de arquitectura (ADR) y guion de demo
+- `backend/migrations/` + `backend/alembic.ini` — migraciones de Alembic (una sola línea hasta la Semana 1)
+- `tests/` — pytest (`conftest.py` con fixtures; `helpers.py` con utilidades importables)
+- `infraestructure/` — reservado para despliegue/IaC; todavía no existe en el repo (git no guarda carpetas vacías). El nombre lleva ese typo a propósito; no renombrar sin avisar
+- `docs/` — casos de uso (`casos-de-uso.md`) y decisiones de arquitectura (`adr/`). El guion de demo está pendiente
+- `.github/workflows/ci.yml` — CI: ruff y pytest en cada push y PR (Python 3.12, sin TensorFlow)
+
+El repo se inicializó con git localmente en la Fase 0 (venía de un ZIP); el remoto se conecta a mano.
 
 ## Comandos
 
@@ -29,23 +34,25 @@ Prioridad de implementación acordada: **1) multitenencia (CU-12, CU-13), 2) B2C
 La app no tiene `__init__.py` y usa namespace packages con imports absolutos tipo `backend.app.models...`, por lo que debe lanzarse desde la raíz:
 
 ```
-python -m venv venv
+py -3.12 -m venv venv          # Windows: el "python" por defecto puede ser 3.15
 venv\Scripts\activate          # Windows
-pip install -r requirements.txt
+pip install -r requirements-dev.txt   # producción + pytest, httpx2, ruff
 cp .env.example .env           # llenar valores, ver "Configuración"
+alembic -c backend/alembic.ini upgrade head   # crea/actualiza el esquema
 uvicorn backend.app.main:app --reload
 ```
 
-`requirements.txt` está en la raíz, no en `backend/`.
+`requirements.txt` (producción, lo usa Render) y `requirements-dev.txt` están en la raíz, no en `backend/`. Las versiones están fijadas; `bcrypt` queda en 4.0.1 porque `passlib` 1.7.4 falla con versiones posteriores.
 
-Pruebas y calidad (una vez configuradas; ver Fase 0):
+Pruebas y calidad:
 
 ```
-pytest -q                      # pruebas
-ruff check . && ruff format .  # lint y formato
-alembic -c backend/alembic.ini upgrade head                 # base de control
-python -m backend.scripts.migrate_all_tenants               # migra TODAS las bases de tenant
+pytest -q                      # pruebas (SQLite en memoria + doble de Storage; no leen .env)
+ruff check . && ruff format .  # lint y formato (configuración en pyproject.toml)
+alembic -c backend/alembic.ini upgrade head   # migra la base de DATABASE_URL (o -x dburl=...)
 ```
+
+Desde la Semana 1: `python -m backend.scripts.migrate_all_tenants` migra todas las bases de tenant (todavía no existe).
 
 ### Frontend (`cd frontend` primero)
 
@@ -61,7 +68,7 @@ npm run preview
 
 Todos los secretos vienen de variables de entorno. Ver `.env.example` (raíz) y `frontend/.env.example`. `main.py` llama `load_dotenv()` antes de importar el resto.
 
-Variables existentes: `DATABASE_URL`, `SECRET_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`, `SUPABASE_BUCKET`, `FRONTEND_ORIGIN`, `MODEL_PATH`, y `VITE_API_URL` en el frontend.
+Variables existentes: `DATABASE_URL`, `SECRET_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`, `SUPABASE_BUCKET`, `FRONTEND_ORIGIN`, `MODEL_PATH`, `MAX_UPLOAD_MB` (opcional, 10 por defecto), y `VITE_API_URL` en el frontend.
 
 Variables nuevas que introduce la multitenencia (agregarlas a `.env.example` sin valores reales):
 - `CONTROL_DATABASE_URL` — base de control (reemplaza el rol actual de `DATABASE_URL`).
@@ -80,11 +87,14 @@ Reglas de infraestructura:
 - `main.py`: carga `.env`, crea `FastAPI()`, agrega `CORSMiddleware` (orígenes de `FRONTEND_ORIGIN`, separados por coma) y monta tres routers bajo `/api/v1`: `health`, `auth` (`/auth`) e `images` (`/images`).
 - `models/database.py`: `engine`, `SessionLocal` y `Base` (único engine global; **esto debe cambiar**, ver multitenencia).
 - `models/user.py` (`User`) y `models/image.py` (`MedicalImage`), relacionados por `MedicalImage.user_id -> User.id`.
-- Cada router define su propio `get_db()` local. **Debe unificarse** en una dependencia compartida que entregue la sesión del tenant.
-- `/health` además crea las tablas (`Base.metadata.create_all`). **No hay Alembic todavía; reemplazar por migraciones.**
-- `services/auth.py`: hash con `passlib`/bcrypt y JWT con `python-jose` (`/register`, `/token`).
+- `api/deps.py`: dependencias compartidas. `get_db` es el **único** punto que entrega sesiones (alias `DbSession`); `get_current_user` (alias `CurrentUser`) lee el Bearer token y devuelve el `User`; `get_storage` (alias `Storage`) entrega el servicio de Storage y es el punto de override en pruebas. En la Semana 1, `get_db` se divide en `get_control_db` (login/registro, que aún no tienen JWT) y `get_tenant_db` (ver `docs/adr/0001-alembic-y-migraciones.md`).
+- `api/v1/*`: routers delgados; la lógica vive en `services/`, y los esquemas Pydantic de entrada/salida en `schemas/`.
+- `/auth/register` recibe JSON (`UserCreate`) y devuelve `UserOut`; `/auth/token` (formulario OAuth2) devuelve `Token` o 401.
+- `/health` solo hace `SELECT 1` (503 genérico si falla). El esquema lo crea **Alembic** (`backend/migrations/`); nunca `create_all`.
+- `services/auth.py`: hash con `passlib`/bcrypt y JWT con `python-jose` (`sub` = id del usuario, `exp` y `sub` obligatorios); también `create_user`, `authenticate_user` y `get_user_by_email`. Los endpoints viven en `api/v1/auth.py`.
+- `services/images.py`: valida la subida (extensión y MIME JPG/PNG, tamaño `MAX_UPLOAD_MB`, que abra con Pillow), escribe un temporal con nombre uuid en el directorio temporal del sistema (lo borra en `finally`) y sube a Storage como `uploads/{user_id}/{uuid}.{ext}`. El nombre del archivo del cliente nunca forma parte de una ruta. DICOM se rechaza hasta CU-09.
 - `services/ml_model.py`: `BreastCancerModel` envuelve un modelo **Keras/TensorFlow** (`.h5`, ruta en `MODEL_PATH`, por defecto `models/breast_cancer_model.h5`). El `.h5` no está en el repo y **ningún router lo invoca aún**.
-- `services/storage.py`: sube imágenes a un bucket de Supabase Storage; lo usa `/images/upload`, que escribe primero en `temp/` local y guarda la URL pública en `MedicalImage.image_path`. No se usa AWS/S3.
+- `services/storage.py`: `SupabaseStorage.upload_file` sube al bucket de Supabase Storage (cliente creado al primer uso) y devuelve la URL pública, que se guarda en `MedicalImage.image_path`. Los fallos se registran solo por tipo y se lanzan como `StorageError` (502). No se usa AWS/S3.
 
 ### Frontend (`frontend/src`)
 
@@ -92,11 +102,14 @@ SPA estándar: `main.jsx` monta `App.jsx`, que define rutas con `react-router-do
 
 ### Brechas conocidas (resolver en este orden)
 
-1. `/images/upload` usa `user_id=1` por defecto en lugar del usuario autenticado. **Es un hueco de seguridad**: conectar `services/auth.get_current_user` antes de construir nada más sobre ese endpoint.
-2. Archivos temporales en `temp/` sin nombres únicos ni limpieza; usar nombres aleatorios (uuid) y borrar en `finally`.
-3. Las URLs públicas de Supabase Storage no sirven para datos médicos: pasar a bucket privado con URLs firmadas de corta duración.
-4. El modelo no está conectado al flujo de subida y es binario (benigno/maligno); CU-02 pide también "normal" (BUSI tiene las tres clases).
-5. Sin pruebas, sin migraciones, sin CI.
+Resueltas en la Fase 0: usuario de `/images/upload` tomado del JWT (antes `user_id=1`), temporales con uuid y limpieza en `finally`, validación de subidas, `get_db` unificado, Alembic, pytest, ruff y CI.
+
+Pendientes:
+1. Las URLs públicas de Supabase Storage no sirven para datos médicos: pasar a bucket privado con URLs firmadas de corta duración (guardar la ruta del objeto, no la URL).
+2. El modelo no está conectado al flujo de subida y es binario (benigno/maligno); CU-02 pide también "normal" (BUSI tiene las tres clases).
+3. Sin rate limit en `/auth/token` ni `/images/upload`.
+4. `is_medical` lo declara el propio usuario al registrarse; se sustituye por roles asignados en la Semana 1.
+5. Si falla el commit después de subir a Storage, queda un objeto huérfano.
 
 ## Arquitectura objetivo: multitenencia (REGLAS INNEGOCIABLES)
 
