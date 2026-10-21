@@ -113,6 +113,12 @@ Reglas de infraestructura:
   - alta de `tenant_admin`/`doctor` (nunca en `b2c`);
   - activación y desactivación;
   - `isolation-check` (READ ONLY, solo conteos).
+- `api/v1/analyses.py` + `services/analyses.py` (CU-02, solo pacientes):
+  - `POST /analyses` (multipart, 10/min) valida y analiza. Guarda la imagen limpia en `{slug}/images/` y el heatmap en `{slug}/heatmaps/`, luego `medical_images` + `analyses`, y audita. Devuelve el reporte y las URLs firmadas.
+  - `GET /analyses` (paginado) y `GET /analyses/{id}` dan el reporte con las URLs firmadas de la imagen y del heatmap.
+  - `DELETE /analyses/{id}` borra primero los objetos de Storage y después las filas, con auditoría. Si Storage falla responde 502 y no borra nada.
+  - Si el análisis es ajeno o no existe, la respuesta es la misma (404) y se registra `analysis.denied`.
+  - Tabla `clinical.analyses` (0008): RLS forzado, política de paciente y FKs compuestas a `patients` y `medical_images`; solo SELECT, INSERT y DELETE.
 - `api/v1/images.py`: `POST /upload` (paciente), `GET /images` y `GET /images/{id}` (con URL firmada; ajena o inexistente da el mismo 404). Lecturas, subidas y accesos denegados (`image.denied`) auditados.
 - `api/v1/audit.py`: `GET /audit` para `tenant_admin` con filtros `from`, `to`, `actor_id`, `limit` y `offset`.
 - `api/rate_limit.py`: límites por IP y ruta: `/auth/token` 10/min, `/auth/register` 5/min, `/images/upload` 20/min. La IP sale de `api/client_ip.py`: ignora `X-Forwarded-For` salvo con `TRUSTED_PROXY_HOPS` (en Render, `1`; ver ADR 0004).
