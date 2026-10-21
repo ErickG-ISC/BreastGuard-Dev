@@ -19,7 +19,7 @@ BreastGuard es una **herramienta de apoyo al diagnóstico** que analiza imágene
 
 ## Tus derechos
 - Puedes **eliminar cualquier análisis** desde tu historial; se borran también la imagen y el mapa de calor.
-- Puedes **pedir la eliminación de tu cuenta y de todos tus datos** escribiendo al equipo del proyecto.
+- Puedes **pedir la eliminación de tu cuenta y de todos tus datos** escribiendo a **privacidad@breastguard.example** (correo provisional del proyecto escolar).
 - Puedes dejar de usar la aplicación en cualquier momento.
 
 ## Antes de aceptar

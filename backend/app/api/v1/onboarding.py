@@ -5,6 +5,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from backend.app.api.client_ip import client_ip
 from backend.app.api.deps import ControlDb, TenantDb, require_role
@@ -75,7 +76,13 @@ def change_my_plan(data: SubscriptionUpdate, auth: PatientUser, db: ControlDb):
     else:
         subscription.plan_code = plan.code
         subscription.started_at = datetime.now(UTC)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Intenta de nuevo en un momento"
+        ) from None
     db.refresh(subscription)
     return _subscription_out(db, subscription)
 

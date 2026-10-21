@@ -145,7 +145,11 @@ def register_patient(db: Session, data: UserCreate, ip: str | None = None) -> Us
     Sin consentimiento de la versión vigente o con un plan inexistente no se crea nada.
     """
     consent = current_consent()
-    if not data.consent_accepted or data.consent_version != consent.version:
+    if (
+        not data.consent_accepted
+        or data.consent_version != consent.version
+        or data.consent_sha256 != consent.sha256
+    ):
         raise ConsentVersionError
     plan = db.get(Plan, data.plan_code)
     if plan is None or not plan.is_active:
@@ -183,7 +187,10 @@ def register_patient(db: Session, data: UserCreate, ip: str | None = None) -> Us
         db.commit()
     except IntegrityError:
         db.rollback()
-        raise EmailAlreadyRegisteredError from None
+        # Solo un email repetido (carrera con otro registro) se reporta como tal
+        if get_user_by_email(db, data.email):
+            raise EmailAlreadyRegisteredError from None
+        raise
     return user
 
 

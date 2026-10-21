@@ -8,7 +8,7 @@ from functools import lru_cache
 from PIL import Image
 from sqlalchemy import Engine, text
 
-from backend.app.content.consent import CURRENT_CONSENT_VERSION
+from backend.app.content.consent import CURRENT_CONSENT_VERSION, current_consent
 from backend.app.db import TenantContext, new_session
 from backend.app.services.auth import create_access_token, get_password_hash
 
@@ -23,6 +23,7 @@ def registration(email: str, full_name: str = "Paciente", **overrides) -> dict:
         "full_name": full_name,
         "consent_accepted": True,
         "consent_version": CURRENT_CONSENT_VERSION,
+        "consent_sha256": current_consent().sha256,
         "plan_code": "basico",
         **overrides,
     }

@@ -63,6 +63,7 @@ export default function Register() {
         password: form.password,
         consent_accepted: accepted,
         consent_version: consent.version,
+        consent_sha256: consent.sha256,
         plan_code: planCode,
       });
       await login(form.email, form.password);

@@ -20,6 +20,9 @@
   - **Nunca es una probabilidad ni un diagnóstico.**
 
 ## Consecuencias
+- El registro exige también el `consent_sha256` del texto mostrado.
+- El consentimiento promete eliminar análisis y quitar el EXIF de las fotos: ambas cosas llegan con CU-02 en esta misma semana, antes de cualquier despliegue.
+- Los consentimientos no se borran con `app_user`; se eliminan al purgar el tenant o a petición, con un script del dueño.
+- El personal de un tenant institucional verá los cuestionarios de las pacientes de su tenant. En `b2c` no hay personal (trigger). En la Semana 4 la política debe sumar la relación médico-paciente y auditar esas lecturas.
 - Cambiar el texto del consentimiento exige una versión nueva: los usuarios existentes conservan la que aceptaron.
 - El texto y las reglas son borradores académicos; deben revisarse con un profesional de la salud antes de cualquier uso real.
-- La eliminación de cuenta se atiende a petición (el texto lo explica). La eliminación de análisis llega con CU-02.

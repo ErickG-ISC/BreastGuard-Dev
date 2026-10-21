@@ -15,6 +15,8 @@ class UserCreate(BaseModel):
     # Consentimiento explícito: sin `true` y la versión vigente no se crea la cuenta
     consent_accepted: Literal[True]
     consent_version: str = Field(min_length=1, max_length=50)
+    # Huella del texto que se mostró: prueba de que se aceptó exactamente esa versión
+    consent_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     plan_code: str = Field(min_length=1, max_length=50)
 
     @field_validator("password")
