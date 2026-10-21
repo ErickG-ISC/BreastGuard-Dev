@@ -1,13 +1,14 @@
 from fastapi import APIRouter
-from backend.app.models.database import engine,Base
+
+from backend.app.models.database import Base, engine
 
 router = APIRouter()
 
-@router.get("/health")
 
+@router.get("/health")
 def health_check():
     try:
-        Base.metadata.create_all(bind=engine) #Crea tablas si no existen
-        return{"status":"ok","database":"connected"}
+        Base.metadata.create_all(bind=engine)  # Crea tablas si no existen
+        return {"status": "ok", "database": "connected"}
     except Exception as e:
-        return{"status":"error","message":str(e)}
+        return {"status": "error", "message": str(e)}

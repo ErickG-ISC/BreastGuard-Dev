@@ -6,6 +6,7 @@ from tensorflow.keras.preprocessing import image
 
 MODEL_PATH = os.environ.get("MODEL_PATH", "models/breast_cancer_model.h5")
 
+
 class BreastCancerModel:
     def __init__(self):
         self.model = load_model(MODEL_PATH)

@@ -7,7 +7,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.app.api.v1 import health, auth, images
+from backend.app.api.v1 import auth, health, images
 
 app = FastAPI()
 
@@ -20,9 +20,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(health.router,prefix="/api/v1")
+app.include_router(health.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1/auth")
 app.include_router(images.router, prefix="/api/v1/images")
+
 
 @app.get("/")
 def read_root():

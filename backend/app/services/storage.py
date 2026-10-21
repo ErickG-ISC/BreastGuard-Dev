@@ -8,6 +8,7 @@ SUPABASE_BUCKET = os.environ.get("SUPABASE_BUCKET", "medical-images")
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+
 def upload_file_to_storage(file_path, object_name):
     try:
         with open(file_path, "rb") as f:
