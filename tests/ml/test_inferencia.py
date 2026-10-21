@@ -10,11 +10,15 @@ from PIL import Image
 
 from backend.app.ml.config import ModelCard, ModelCardError
 from backend.app.ml.heatmap import class_activation_map, generate_heatmap
-from backend.app.ml.quality import check_image, normalized_entropy, prediction_flags
+from backend.app.ml.quality import (
+    ImageQualityError,
+    check_image,
+    normalized_entropy,
+    prediction_flags,
+)
 from backend.app.ml.report import DEMO_NOTICE, DISCLAIMER, build_report
 from backend.app.ml.runtime import FakePredictor, Prediction, to_model_input
 from backend.app.ml.service import (
-    ImageQualityError,
     InferenceService,
     prepare_image,
     run_analysis,
@@ -117,7 +121,7 @@ class TestCalidad:
         uniform = Prediction(
             {"normal": 0.34, "benigno": 0.33, "maligno": 0.33}, np.zeros((1, 1, 1))
         )
-        assert set(prediction_flags(uniform, SETTINGS)) == {"low_confidence", "high_uncertainty"}
+        assert {"low_confidence", "high_uncertainty"} <= set(prediction_flags(uniform, SETTINGS))
         clear = Prediction({"normal": 0.95, "benigno": 0.04, "maligno": 0.01}, np.zeros((1, 1, 1)))
         assert prediction_flags(clear, SETTINGS) == []
         assert normalized_entropy({"a": 0.5, "b": 0.5}) == pytest.approx(1.0)
@@ -223,3 +227,92 @@ class TestServicio:
         with pytest.raises(HTTPException) as exc:
             asyncio.run(scenario())
         assert exc.value.status_code == 503
+
+
+class TestRevisionDeSeguridad:
+    def test_imagen_enorme_se_rechaza_antes_de_decodificar(self):
+        settings = MLSettings(max_pixels=10_000)
+        data = png_bytes(Image.new("L", (200, 200)))
+        with pytest.raises(ImageQualityError, match="demasiado grande"):
+            prepare_image(data, settings)
+
+    def test_bomba_de_descompresion_es_422_no_500(self, monkeypatch):
+        monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", 1000)
+        with pytest.raises(ImageQualityError):
+            prepare_image(png_bytes(Image.new("L", (100, 100))), MLSettings())
+
+    @pytest.mark.parametrize("data", [b"no es una imagen", b"\x89PNG\r\n\x1a\n" + b"\x00" * 30])
+    def test_bytes_ilegibles(self, data):
+        with pytest.raises(ImageQualityError, match="No se pudo leer"):
+            prepare_image(data)
+
+    def test_imagen_grande_se_reduce(self):
+        clean = prepare_image(png_bytes(ultrasound((3000, 1500))), MLSettings(max_side_px=1024))
+        assert max(clean.size) == 1024
+
+    def test_orientacion_exif_se_aplica_y_se_descarta(self):
+        exif = Image.Exif()
+        exif[0x0112] = 6  # rotar 90°
+        data = png_bytes(ultrasound((300, 200)).convert("RGB"), fmt="JPEG", exif=exif)
+        clean = prepare_image(data)
+        assert clean.size == (200, 300)
+        assert not clean.getexif()
+
+    def test_probabilidad_de_maligno_notable_no_da_sin_hallazgos(self):
+        probs = {"normal": 0.62, "benigno": 0.01, "maligno": 0.37}
+        predictor = FakePredictor(ModelCard.from_dict(CARD3), probs)
+        outcome = run_analysis(ultrasound(), predictor, SETTINGS)
+        assert "notable_malignant_probability" in outcome.flags
+        assert outcome.status == "inconclusive"
+        assert outcome.report["level"] == "inconclusive"
+        assert "consulta a tu médica o médico" in outcome.report["recommendation"].lower()
+
+    @pytest.mark.parametrize(
+        "probs",
+        [
+            {"normal": float("nan"), "benigno": 0.0, "maligno": 0.0},
+            {"normal": 0.9, "benigno": 0.9, "maligno": 0.9},
+            {"normal": float("inf"), "benigno": 0.0, "maligno": 0.0},
+        ],
+    )
+    def test_salida_invalida_es_no_concluyente(self, probs):
+        prediction = Prediction(probs, np.zeros((1, 1, 1)))
+        assert prediction_flags(prediction, SETTINGS) == ["invalid_output"]
+
+    def test_lock_impide_inferencias_solapadas(self):
+        import threading
+        import time
+
+        from backend.app.ml.runtime import LiteRTPredictor
+
+        active, overlaps = [0], []
+
+        class SlowInterpreter:
+            def set_tensor(self, *a):
+                active[0] += 1
+                if active[0] > 1:
+                    overlaps.append(True)
+                time.sleep(0.01)
+
+            def invoke(self):
+                time.sleep(0.01)
+
+            def get_tensor(self, index):
+                active[0] -= 1 if index == "features" else 0
+                if index == "probs":
+                    return np.array([[0.2, 0.3, 0.5]])
+                return np.zeros((1, 7, 7, 2))
+
+        predictor = LiteRTPredictor.__new__(LiteRTPredictor)
+        predictor.card = ModelCard.from_dict(CARD3)
+        predictor._interpreter = SlowInterpreter()
+        predictor._input, predictor._probs_index, predictor._features_index = 0, "probs", "features"
+        predictor._lock = threading.Lock()
+        threads = [
+            threading.Thread(target=predictor.predict, args=(ultrasound(),)) for _ in range(4)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert overlaps == []

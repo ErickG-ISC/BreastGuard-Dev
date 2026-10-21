@@ -12,6 +12,8 @@ from PIL import Image
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.app.ml.quality import ImageQualityError
+from backend.app.ml.service import prepare_image
 from backend.app.models.clinical import MedicalImage, Patient
 from backend.app.services import audit
 from backend.app.services.auth import AuthContext
@@ -78,6 +80,19 @@ async def read_and_validate_image(file: UploadFile) -> ValidatedImage:
     return ValidatedImage(data=data, extension=stored_extension, content_type=content_type)
 
 
+def strip_metadata(data: bytes, extension: str) -> bytes:
+    """Re-codifica la imagen desde sus píxeles: sin EXIF, GPS ni otros metadatos."""
+    try:
+        clean = prepare_image(data)
+    except ImageQualityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from None
+    buffer = io.BytesIO()
+    clean.save(buffer, format="JPEG" if extension == ".jpg" else "PNG")
+    return buffer.getvalue()
+
+
 def store_medical_image(
     db: Session,
     storage: SupabaseStorage,
@@ -101,7 +116,8 @@ def store_medical_image(
     object_name = f"{auth.tenant_slug}/images/{image_id.hex}{image.extension}"
     temp_path = Path(tempfile.gettempdir()) / f"{uuid.uuid4().hex}{image.extension}"
     try:
-        temp_path.write_bytes(image.data)
+        # Se guarda la imagen reconstruida sin metadatos (EXIF/GPS), nunca el original
+        temp_path.write_bytes(strip_metadata(image.data, image.extension))
         try:
             storage.upload_file(str(temp_path), object_name, image.content_type)
         except StorageError:

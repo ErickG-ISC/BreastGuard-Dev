@@ -23,8 +23,14 @@ class MLSettings:
     confidence_high: float = 0.85
     confidence_min: float = 0.60
     suspicious_classes: frozenset[str] = field(default_factory=lambda: frozenset({"maligno"}))
+    # Aunque no gane, una probabilidad de maligno así de alta vuelve el resultado no concluyente
+    malignant_attention_probability: float = 0.25
     # Calidad de entrada
     min_side_px: int = 128
+    # Antes de decodificar: más píxeles que esto se rechaza (bombas de descompresión, RAM)
+    max_pixels: int = 25_000_000
+    # La imagen se reduce a este lado máximo antes de analizarla y guardarla
+    max_side_px: int = 2048
     max_mean_saturation: float = 0.15  # 0–1; una ecografía es casi gris
     min_pixel_stddev: float = 6.0  # 0–255; menos es una imagen casi uniforme
     max_normalized_entropy: float = 0.97  # 1 = probabilidades totalmente repartidas

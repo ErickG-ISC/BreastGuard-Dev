@@ -6,24 +6,24 @@ las peticiones que esperen más de queue_timeout_seconds reciben 503.
 
 import asyncio
 import io
+import warnings
 from dataclasses import dataclass
 
 import numpy as np
 from fastapi import HTTPException, status
 from fastapi.concurrency import run_in_threadpool
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from backend.app.ml.heatmap import generate_heatmap
-from backend.app.ml.quality import QualityIssue, check_image, prediction_flags
+from backend.app.ml.quality import (
+    ImageQualityError,
+    QualityIssue,
+    check_image,
+    prediction_flags,
+)
 from backend.app.ml.report import build_report
 from backend.app.ml.runtime import Predictor
 from backend.app.ml.settings import MLSettings
-
-
-class ImageQualityError(Exception):
-    def __init__(self, issues: list[QualityIssue]) -> None:
-        super().__init__(issues[0].message)
-        self.issues = issues
 
 
 @dataclass(frozen=True)
@@ -39,14 +39,44 @@ class AnalysisOutcome:
     heatmap_png: bytes
 
 
-def prepare_image(data: bytes) -> Image.Image:
-    """Abre, corrige la orientación (EXIF) y DESCARTA los metadatos (ubicación del teléfono)."""
-    with Image.open(io.BytesIO(data)) as raw:
-        oriented = ImageOps.exif_transpose(raw)
-        if oriented.mode not in ("RGB", "L"):
-            oriented = oriented.convert("RGB")
-        # Reconstruir desde los píxeles crea una imagen sin `info` (EXIF, GPS, ICC, comentarios)
-        return Image.fromarray(np.asarray(oriented))
+def prepare_image(data: bytes, settings: MLSettings | None = None) -> Image.Image:
+    """Abre, corrige la orientación (EXIF), reduce y DESCARTA los metadatos.
+
+    El tamaño se comprueba ANTES de decodificar los píxeles (bombas de descompresión).
+    """
+    settings = settings or MLSettings()
+    unreadable = ImageQualityError(
+        [
+            QualityIssue(
+                "unreadable", "No se pudo leer la imagen. Prueba con otro archivo JPG o PNG."
+            )
+        ]
+    )
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(io.BytesIO(data)) as raw:
+                width, height = raw.size
+                if width * height > settings.max_pixels:
+                    raise ImageQualityError(
+                        [QualityIssue("too_large", "La imagen es demasiado grande.")]
+                    )
+                limit = (settings.max_side_px, settings.max_side_px)
+                raw.draft("RGB", limit)  # JPEG: decodifica ya reducida
+                oriented = ImageOps.exif_transpose(raw)
+                if oriented.mode not in ("RGB", "L"):
+                    oriented = oriented.convert("RGB")
+                oriented.thumbnail(limit, Image.Resampling.LANCZOS)
+                # Reconstruir desde los píxeles crea una imagen sin `info` (EXIF, GPS, ICC, XMP)
+                return Image.fromarray(np.asarray(oriented))
+    except ImageQualityError:
+        raise
+    except (Image.DecompressionBombError, Image.DecompressionBombWarning):
+        raise ImageQualityError(
+            [QualityIssue("too_large", "La imagen es demasiado grande.")]
+        ) from None
+    except (UnidentifiedImageError, OSError, ValueError, SyntaxError):
+        raise unreadable from None
 
 
 def _png(image: Image.Image) -> bytes:
@@ -107,7 +137,7 @@ class InferenceService:
                 detail="Hay muchos análisis en curso. Intenta de nuevo en un momento.",
             ) from None
         try:
-            image = await run_in_threadpool(prepare_image, data)
+            image = await run_in_threadpool(prepare_image, data, self.settings)
             return await run_in_threadpool(run_analysis, image, self.predictor, self.settings)
         finally:
             self._semaphore.release()

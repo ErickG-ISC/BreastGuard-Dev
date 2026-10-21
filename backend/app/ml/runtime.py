@@ -4,6 +4,7 @@ Todo predictor devuelve probabilidades por clase canónica y las activaciones de
 convolucional, que `heatmap.generate_heatmap` usa para el mapa de calor.
 """
 
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -72,15 +73,19 @@ class LiteRTPredictor:
         probs_shape = next(o["shape"] for o in outputs if o["index"] == self._probs_index)
         if int(probs_shape[-1]) != n_classes:
             raise ValueError("El número de clases del modelo no coincide con la ficha")
-        head = np.load(model_dir / "head.npz")
+        self._lock = threading.Lock()
+        head = np.load(model_dir / "head.npz", allow_pickle=False)
         self._kernel = head["kernel"].astype(np.float32)  # (k, clases)
 
     def predict(self, image: Image.Image) -> Prediction:
-        # No es seguro entre hilos: el servicio limita a una inferencia a la vez
-        self._interpreter.set_tensor(self._input, to_model_input(image, self.card))
-        self._interpreter.invoke()
-        probs = self._interpreter.get_tensor(self._probs_index)[0].astype(float)
-        features = self._interpreter.get_tensor(self._features_index)[0].astype(np.float32)
+        tensor = to_model_input(image, self.card)
+        # El intérprete no es seguro entre hilos: aunque se suba MAX_CONCURRENT_INFERENCES, el
+        # lock evita que una paciente reciba la salida de otra
+        with self._lock:
+            self._interpreter.set_tensor(self._input, tensor)
+            self._interpreter.invoke()
+            probs = self._interpreter.get_tensor(self._probs_index)[0].astype(float).copy()
+            features = self._interpreter.get_tensor(self._features_index)[0].astype(np.float32)
         return Prediction(
             probabilities={
                 name: float(p) for name, p in zip(self.card.classes, probs, strict=True)

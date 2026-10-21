@@ -16,6 +16,12 @@ class QualityIssue:
     message: str
 
 
+class ImageQualityError(Exception):
+    def __init__(self, issues: list[QualityIssue]) -> None:
+        super().__init__(issues[0].message)
+        self.issues = issues
+
+
 def check_image(image: Image.Image, settings: MLSettings) -> list[QualityIssue]:
     """Problemas que impiden analizar la imagen (se responde 422 con el mensaje)."""
     issues: list[QualityIssue] = []
@@ -52,7 +58,19 @@ def normalized_entropy(probabilities: dict[str, float]) -> float:
 
 def prediction_flags(prediction: Prediction, settings: MLSettings) -> list[str]:
     """Marcas que vuelven el resultado NO CONCLUYENTE (se recomienda consultar)."""
+    values = list(prediction.probabilities.values())
+    if not all(math.isfinite(v) and 0.0 <= v <= 1.0 for v in values) or not math.isclose(
+        sum(values), 1.0, abs_tol=1e-3
+    ):
+        # Salida inválida del modelo: nunca se reporta como un resultado
+        return ["invalid_output"]
     flags = []
+    malignant = prediction.probabilities.get("maligno", 0.0)
+    if (
+        prediction.predicted_class not in settings.suspicious_classes
+        and malignant >= settings.malignant_attention_probability
+    ):
+        flags.append("notable_malignant_probability")
     if prediction.confidence < settings.confidence_min:
         flags.append("low_confidence")
     if normalized_entropy(prediction.probabilities) > settings.max_normalized_entropy:
