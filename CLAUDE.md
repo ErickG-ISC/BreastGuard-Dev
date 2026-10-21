@@ -47,7 +47,7 @@ uvicorn backend.app.main:app --reload
 Pruebas y calidad:
 
 ```
-pytest -q                      # pruebas (SQLite en memoria + doble de Storage; no leen .env)
+pytest -q                      # pruebas (desde la Semana 1, contra Postgres local: docker compose up -d db)
 ruff check . && ruff format .  # lint y formato (configuración en pyproject.toml)
 alembic -c backend/alembic.ini upgrade head   # migra la base de DATABASE_URL (o -x dburl=...)
 ```
@@ -88,9 +88,9 @@ Reglas de infraestructura:
 
 - `main.py`: carga `.env`, crea `FastAPI()`, agrega `CORSMiddleware` (orígenes de `FRONTEND_ORIGIN`, separados por coma) y monta tres routers bajo `/api/v1`: `health`, `auth` (`/auth`) e `images` (`/images`).
 - `models/base.py`: `Base` declarativa, sin efectos secundarios (la importan los modelos y `backend/migrations/env.py`).
-- `models/database.py`: `engine` y `SessionLocal` globales leídos de `DATABASE_URL` (único engine global; **esto debe cambiar**, ver multitenencia).
+- `models/database.py`: `engine` y `SessionLocal` globales leídos de `DATABASE_URL` (engine global con el rol dueño; **se elimina en la Semana 1**: la app solo tendrá el engine de `app_user`).
 - `models/user.py` (`User`) y `models/image.py` (`MedicalImage`), relacionados por `MedicalImage.user_id -> User.id`.
-- `api/deps.py`: dependencias compartidas. `get_db` es el **único** punto que entrega sesiones (alias `DbSession`); `get_current_user` (alias `CurrentUser`) lee el Bearer token y devuelve el `User`; `get_storage` (alias `Storage`) entrega el servicio de Storage y es el punto de override en pruebas. En la Semana 1, `get_db` se divide en `get_control_db` (login/registro, que aún no tienen JWT) y `get_tenant_db` (ver `docs/adr/0001-alembic-y-migraciones.md`).
+- `api/deps.py`: dependencias compartidas. `get_db` es el **único** punto que entrega sesiones (alias `DbSession`); `get_current_user` (alias `CurrentUser`) lee el Bearer token y devuelve el `User`; `get_storage` (alias `Storage`) entrega el servicio de Storage y es el punto de override en pruebas. En la Semana 1, `get_db` se divide en `get_control_db` (login/registro, que aún no tienen JWT) y `get_tenant_db` (ver ADR 0002 y 0003).
 - `api/v1/*`: routers delgados; la lógica vive en `services/`, y los esquemas Pydantic de entrada/salida en `schemas/`.
 - `/auth/register` recibe JSON (`UserCreate`) y devuelve `UserOut`; `/auth/token` (formulario OAuth2) devuelve `Token` o 401.
 - `/health` solo hace `SELECT 1` (503 genérico si falla). El esquema lo crea **Alembic** (`backend/migrations/`); nunca `create_all`.
