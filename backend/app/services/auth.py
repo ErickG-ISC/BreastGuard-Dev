@@ -1,3 +1,4 @@
+import ipaddress
 import os
 import uuid
 from dataclasses import dataclass
@@ -10,9 +11,10 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from backend.app.content.consent import current_consent
 from backend.app.db import TenantContext, set_transaction_context
 from backend.app.models.clinical import Patient
-from backend.app.models.control import ROLES, Tenant, User
+from backend.app.models.control import ROLES, Consent, Plan, Subscription, Tenant, User
 from backend.app.schemas.auth import UserCreate
 
 SECRET_KEY = os.environ["SECRET_KEY"]
@@ -32,6 +34,14 @@ class InactiveAccountError(Exception):
 
 
 class EmailAlreadyRegisteredError(Exception):
+    pass
+
+
+class ConsentVersionError(Exception):
+    """La versión de consentimiento aceptada no es la vigente."""
+
+
+class UnknownPlanError(Exception):
     pass
 
 
@@ -129,8 +139,17 @@ def get_user_by_email(db: Session, email: str) -> User | None:
     return db.scalars(select(User).where(func.lower(User.email) == email.lower())).first()
 
 
-def register_patient(db: Session, data: UserCreate) -> User:
-    """Crea la cuenta (control) y la ficha clínica (b2c) en UNA transacción."""
+def register_patient(db: Session, data: UserCreate, ip: str | None = None) -> User:
+    """Cuenta + consentimiento + plan simulado (control) y ficha clínica (b2c) en UNA transacción.
+
+    Sin consentimiento de la versión vigente o con un plan inexistente no se crea nada.
+    """
+    consent = current_consent()
+    if not data.consent_accepted or data.consent_version != consent.version:
+        raise ConsentVersionError
+    plan = db.get(Plan, data.plan_code)
+    if plan is None or not plan.is_active:
+        raise UnknownPlanError
     tenant = db.scalars(
         select(Tenant).where(Tenant.slug == B2C_TENANT_SLUG, Tenant.is_active.is_(True))
     ).first()
@@ -148,6 +167,16 @@ def register_patient(db: Session, data: UserCreate) -> User:
     try:
         db.add(user)
         db.flush()
+        db.add(
+            Consent(
+                user_id=user.id,
+                version=consent.version,
+                text_sha256=consent.sha256,
+                ip=_clean_ip(ip),
+            )
+        )
+        db.add(Subscription(user_id=user.id, plan_code=plan.code))
+        db.flush()
         # Alta documentada (ADR 0002): contexto del tenant b2c solo para insertar la ficha
         set_transaction_context(db, TenantContext(tenant.id, user.id, "patient"))
         db.add(Patient(user_id=user.id, display_name=data.full_name))
@@ -156,6 +185,15 @@ def register_patient(db: Session, data: UserCreate) -> User:
         db.rollback()
         raise EmailAlreadyRegisteredError from None
     return user
+
+
+def _clean_ip(ip: str | None) -> str | None:
+    if not ip:
+        return None
+    try:
+        return str(ipaddress.ip_address(ip))
+    except ValueError:
+        return None
 
 
 def authenticate_user(db: Session, email: str, password: str) -> User | None:

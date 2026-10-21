@@ -1,4 +1,5 @@
 import uuid
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
@@ -11,6 +12,10 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8)
     full_name: str = Field(min_length=1, max_length=200)
+    # Consentimiento explícito: sin `true` y la versión vigente no se crea la cuenta
+    consent_accepted: Literal[True]
+    consent_version: str = Field(min_length=1, max_length=50)
+    plan_code: str = Field(min_length=1, max_length=50)
 
     @field_validator("password")
     @classmethod

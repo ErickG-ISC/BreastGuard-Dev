@@ -1,15 +1,18 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 
+from backend.app.api.client_ip import client_ip
 from backend.app.api.deps import ControlDb, CurrentUser
 from backend.app.api.rate_limit import rate_limit
 from backend.app.schemas.auth import MeOut, Token, UserCreate, UserOut
 from backend.app.services.auth import (
+    ConsentVersionError,
     EmailAlreadyRegisteredError,
     InactiveAccountError,
     RegistrationUnavailableError,
+    UnknownPlanError,
     authenticate_user,
     create_access_token,
     register_patient,
@@ -24,10 +27,19 @@ router = APIRouter()
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(rate_limit("auth_register", 5, 60))],
 )
-def register(data: UserCreate, db: ControlDb):
-    """Registro público: siempre crea una paciente en el tenant B2C."""
+def register(data: UserCreate, db: ControlDb, request: Request):
+    """Registro público: siempre crea una paciente en el tenant B2C, con consentimiento y plan."""
     try:
-        return register_patient(db, data)
+        return register_patient(db, data, client_ip(request))
+    except ConsentVersionError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Debes aceptar la versión vigente del consentimiento informado",
+        ) from None
+    except UnknownPlanError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Plan no disponible"
+        ) from None
     except EmailAlreadyRegisteredError:
         raise HTTPException(status_code=400, detail="El email ya está registrado") from None
     except RegistrationUnavailableError:

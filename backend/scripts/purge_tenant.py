@@ -19,7 +19,7 @@ from sqlalchemy.engine import make_url
 
 # Orden de borrado (hijas antes que padres). Si aparece una tabla clínica nueva, la purga se
 # detiene hasta que se agregue aquí: así nunca deja filas huérfanas de un tenant.
-CLINICAL_DELETE_ORDER = ("audit_log", "medical_images", "patients")
+CLINICAL_DELETE_ORDER = ("audit_log", "questionnaires", "medical_images", "patients")
 
 
 class PurgeError(Exception):
@@ -78,6 +78,16 @@ def purge_tenant(
                     text(f"DELETE FROM clinical.{table} WHERE tenant_id = :id"), {"id": tenant.id}
                 )
                 summary.deleted[f"clinical.{table}"] = result.rowcount
+            # Datos de cuenta ligados a los usuarios del tenant, antes de borrar los usuarios
+            for table in ("consents", "subscriptions"):
+                result = conn.execute(
+                    text(
+                        f"DELETE FROM control.{table} WHERE user_id IN "
+                        "(SELECT id FROM control.users WHERE tenant_id = :id)"
+                    ),
+                    {"id": tenant.id},
+                )
+                summary.deleted[f"control.{table}"] = result.rowcount
             for table, column in (("users", "tenant_id"), ("tenants", "id")):
                 result = conn.execute(
                     text(f"DELETE FROM control.{table} WHERE {column} = :id"), {"id": tenant.id}
