@@ -111,6 +111,7 @@ Pendientes:
 3. Sin rate limit en `/auth/token` ni `/images/upload`.
 4. `is_medical` lo declara el propio usuario al registrarse; se sustituye por roles asignados en la Semana 1.
 5. Si falla el commit después de subir a Storage, queda un objeto huérfano.
+6. La ruta `uploads/{user_id}/...` es provisional: en la Semana 1 pasa a `{tenant_slug}/...` con el slug resuelto en el servidor.
 
 ## Arquitectura objetivo: multitenencia (REGLAS INNEGOCIABLES)
 
