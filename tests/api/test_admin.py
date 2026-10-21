@@ -188,6 +188,7 @@ class TestChequeoDeAislamiento:
             "medical_images",
             "audit_log",
             "questionnaires",
+            "analyses",
         }
 
     def test_no_deja_rastro(self, client, root, owner_engine):

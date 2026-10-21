@@ -82,7 +82,8 @@ def _clean_tables(request):
     with engine.begin() as conn:
         conn.execute(
             text(
-                "TRUNCATE clinical.audit_log, clinical.questionnaires, clinical.medical_images, "
+                "TRUNCATE clinical.audit_log, clinical.questionnaires, clinical.analyses, "
+                "clinical.medical_images, "
                 "clinical.patients"
             )
         )
@@ -100,7 +101,9 @@ class FakeStorage:
         self.objects: dict[str, bytes] = {}
         self.uploaded_from: list[str] = []
         self.signed: list[str] = []
+        self.removed: list[str] = []
         self.fail = False
+        self.fail_remove = False
 
     def upload_file(self, file_path: str, object_name: str, content_type: str) -> None:
         self.uploaded_from.append(file_path)
@@ -108,6 +111,18 @@ class FakeStorage:
             raise StorageError
         with open(file_path, "rb") as f:
             self.objects[object_name] = f.read()
+
+    def upload_bytes(self, object_name: str, data: bytes, content_type: str) -> None:
+        if self.fail:
+            raise StorageError
+        self.objects[object_name] = data
+
+    def remove_objects(self, object_names: list[str]) -> None:
+        if self.fail_remove:
+            raise StorageError
+        for name in object_names:
+            self.objects.pop(name, None)
+        self.removed.extend(object_names)
 
     def create_signed_url(self, object_name: str, expires_in: int) -> str:
         self.signed.append(object_name)

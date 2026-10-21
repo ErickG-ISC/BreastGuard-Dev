@@ -120,6 +120,59 @@ def _insert_questionnaire(conn, tenant_id, actor, parents, overrides):
     return values["id"]
 
 
+def _insert_analysis(conn, tenant_id, actor, parents, overrides):
+    values = {
+        "id": uuid.uuid4(),
+        "patient_id": parents["patient_id"],
+        "image_id": parents["image_id"],
+        "created_by": actor.id,
+        **overrides,
+    }
+    columns = [
+        "id",
+        "patient_id",
+        "image_id",
+        "created_by",
+        "status",
+        "predicted_class",
+        "probabilities",
+        "confidence",
+        "model_version",
+        "heatmap_path",
+        "quality_flags",
+        "report",
+    ]
+    binds = [
+        ":id",
+        ":patient_id",
+        ":image_id",
+        ":created_by",
+        "'completed'",
+        "'normal'",
+        "'{}'::jsonb",
+        "0.9",
+        "'fake'",
+        "'x/heatmaps/y.png'",
+        "'[]'::jsonb",
+        "'{}'::jsonb",
+    ]
+    if tenant_id is not None:
+        columns.append("tenant_id")
+        binds.append(":tenant_id")
+        values["tenant_id"] = tenant_id
+    conn.execute(
+        text(f"INSERT INTO clinical.analyses ({', '.join(columns)}) VALUES ({', '.join(binds)})"),
+        values,
+    )
+    return values["id"]
+
+
+def _image_parent(conn, tenant_id, actor):
+    parents = _patient_parent(conn, tenant_id, actor)
+    parents["image_id"] = _insert_image(conn, tenant_id, actor, parents, {})
+    return parents
+
+
 def _patient_parent(conn, tenant_id, actor):
     return {"patient_id": _insert_patient(conn, tenant_id, actor, {}, {})}
 
@@ -152,6 +205,18 @@ RECIPES: dict[str, Recipe] = {
             "fk_questionnaires_patient": lambda seed_b, world: {
                 "patient_id": seed_b.parents["patient_id"]
             }
+        },
+    ),
+    "analyses": Recipe(
+        parents=_image_parent,
+        insert=_insert_analysis,
+        update_column="status",
+        update_value="'inconclusive'",
+        cross_fk={
+            "fk_analyses_patient": lambda seed_b, world: {
+                "patient_id": seed_b.parents["patient_id"]
+            },
+            "fk_analyses_image": lambda seed_b, world: {"image_id": seed_b.parents["image_id"]},
         },
     ),
     "audit_log": Recipe(

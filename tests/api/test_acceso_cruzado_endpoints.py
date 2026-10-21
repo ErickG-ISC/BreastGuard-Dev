@@ -61,6 +61,15 @@ PROTECTED = {
         {"json": {"version": "v1", "answers": {}}},
     ),
     "questionnaire_latest": ("GET", f"{API}/questionnaires/latest", {}),
+    # CU-02 (solo pacientes)
+    "analyses_create": (
+        "POST",
+        f"{API}/analyses",
+        {"files": {"file": ("eco.png", make_image_bytes("PNG"), "image/png")}},
+    ),
+    "analyses_list": ("GET", f"{API}/analyses", {}),
+    "analyses_detail": ("GET", f"{API}/analyses/{SOME_ID}", {}),
+    "analyses_delete": ("DELETE", f"{API}/analyses/{SOME_ID}", {}),
 }
 PATIENT_ONLY_ENDPOINTS = [
     "subscription_get",
@@ -68,6 +77,10 @@ PATIENT_ONLY_ENDPOINTS = [
     "questionnaire_definition",
     "questionnaire_submit",
     "questionnaire_latest",
+    "analyses_create",
+    "analyses_list",
+    "analyses_detail",
+    "analyses_delete",
 ]
 ADMIN_ENDPOINTS = [name for name in PROTECTED if name.startswith("admin_")]
 
