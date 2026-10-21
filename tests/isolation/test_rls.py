@@ -3,10 +3,12 @@
 import uuid
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import insert, text
 from sqlalchemy.exc import DBAPIError
 
-from backend.app.db import TenantContext, new_session
+from backend.app.db import TenantContext, get_engine, new_session
+from backend.app.models.clinical import AuditLog
+from backend.migrations.rls import assert_bypass
 from tests.helpers import tenant_session
 
 CLINICAL_TABLES = ("patients", "medical_images", "audit_log")
@@ -63,7 +65,8 @@ class TestSinContexto:
 
     def test_insert_falla(self, two_tenants):
         a, _ = two_tenants
-        with new_session() as session, pytest.raises(DBAPIError):
+        # Sin contexto, tenant_id queda NULL (NOT NULL) o choca con la política: nunca se inserta
+        with new_session() as session, pytest.raises(DBAPIError, match="row-level|null value"):
             session.execute(
                 text("INSERT INTO clinical.patients (display_name) VALUES ('sin contexto')")
             )
@@ -216,3 +219,75 @@ class TestAuditoria:
             assert count(session, "audit_log") == 1
         with tenant_session(a["doctor"]) as session:
             assert count(session, "audit_log") == 0
+
+
+class TestRevisionDeSeguridad:
+    def test_contexto_platform_admin_ve_cero_filas(self, two_tenants):
+        a, _ = two_tenants
+        ctx = TenantContext(a["tenant"].id, a["doctor"].id, "platform_admin")
+        with new_session(ctx) as session:
+            assert count(session, "patients") == 0
+            assert count(session, "medical_images") == 0
+
+    def test_paciente_no_modifica_ni_borra_imagenes_ajenas(self, two_tenants, user_factory):
+        a, _ = two_tenants
+        other = user_factory(a["tenant"], role="patient")
+        with tenant_session(other) as session:
+            updated = session.execute(
+                text("UPDATE clinical.medical_images SET prediction = 'x' WHERE id = :id"),
+                {"id": a["image"]},
+            ).rowcount
+            deleted = session.execute(
+                text("DELETE FROM clinical.medical_images WHERE id = :id"), {"id": a["image"]}
+            ).rowcount
+        assert updated == 0 and deleted == 0
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "UPDATE clinical.medical_images SET object_path = 'otro/images/x.png'",
+            "UPDATE clinical.medical_images SET patient_id = gen_random_uuid()",
+            "UPDATE clinical.patients SET user_id = NULL",
+            "DELETE FROM clinical.patients",
+        ],
+    )
+    def test_columnas_y_operaciones_no_permitidas(self, two_tenants, sql):
+        a, _ = two_tenants
+        with tenant_session(a["doctor"]) as session:
+            with pytest.raises(DBAPIError, match="permission denied"):
+                session.execute(text(sql))
+
+    @pytest.mark.parametrize("role_key", ["doctor", "patient"])
+    def test_auditoria_se_inserta_con_core_para_cualquier_rol(self, two_tenants, role_key):
+        a, _ = two_tenants
+        user = a[role_key]
+        with tenant_session(user) as session:
+            session.execute(
+                insert(AuditLog).values(
+                    id=uuid.uuid4(),
+                    tenant_id=user.tenant_id,
+                    actor_id=user.id,
+                    actor_role=user.role,
+                    action="prueba",
+                )
+            )
+            session.commit()
+
+    def test_auditoria_con_returning_falla_para_no_admin(self, two_tenants):
+        # Documenta por qué el servicio de auditoría no usa session.add (RETURNING)
+        a, _ = two_tenants
+        doctor = a["doctor"]
+        with tenant_session(doctor) as session, pytest.raises(DBAPIError, match="row-level"):
+            session.execute(
+                insert(AuditLog)
+                .values(id=uuid.uuid4(), actor_id=doctor.id, actor_role="doctor", action="x")
+                .returning(AuditLog.id)
+            )
+
+    def test_b2c_solo_admite_pacientes(self, b2c_tenant, user_factory):
+        with pytest.raises(DBAPIError, match="solo admite"):
+            user_factory(b2c_tenant, role="doctor")
+
+    def test_migraciones_de_datos_exigen_bypassrls(self, database):
+        with get_engine().connect() as conn, pytest.raises(RuntimeError, match="BYPASSRLS"):
+            assert_bypass(conn)

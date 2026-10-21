@@ -57,6 +57,21 @@ def create_database(name: str) -> None:
         engine.dispose()
 
 
+def ensure_supabase_api_roles() -> None:
+    """Crea anon/authenticated/service_role (como en Supabase) para probar las revocaciones."""
+    engine = admin_engine()
+    try:
+        with engine.connect() as conn:
+            for role in ("anon", "authenticated", "service_role"):
+                exists = conn.execute(
+                    text("SELECT 1 FROM pg_roles WHERE rolname = :r"), {"r": role}
+                ).first()
+                if not exists:
+                    conn.execute(text(f"CREATE ROLE {role} NOLOGIN"))
+    finally:
+        engine.dispose()
+
+
 def drop_database(name: str) -> None:
     engine = admin_engine()
     try:

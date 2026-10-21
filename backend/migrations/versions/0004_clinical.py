@@ -39,6 +39,9 @@ depends_on: str | Sequence[str] | None = None
 TABLES = ("audit_log", "medical_images", "patients")  # orden de borrado
 
 # Un rol nulo nunca pasa: las políticas por rol exigen contexto completo
+# Solo los roles clínicos del tenant pasan; un rol nulo o desconocido (p. ej. platform_admin)
+# ve 0 filas
+CLINICAL_ROLE = f"{CURRENT_ROLE} IN ('patient', 'doctor', 'tenant_admin')"
 ROLE_PRESENT = f"{CURRENT_ROLE} IS NOT NULL"
 OWN_PATIENT_ROW = f"user_id = {CURRENT_USER}"
 OWN_PATIENT_IDS = (
@@ -71,9 +74,9 @@ def upgrade() -> None:
         )
     enable_tenant_rls("patients")
     # Un paciente solo ve (y crea) su propia ficha
-    patient_rule = f"{ROLE_PRESENT} AND ({CURRENT_ROLE} <> 'patient' OR {OWN_PATIENT_ROW})"
+    patient_rule = f"{CLINICAL_ROLE} AND ({CURRENT_ROLE} <> 'patient' OR {OWN_PATIENT_ROW})"
     add_role_policy("patients", "patients_by_role", patient_rule, with_check_sql=patient_rule)
-    grant_app("patients", "SELECT, INSERT, UPDATE, DELETE")
+    grant_app("patients", "SELECT, INSERT, UPDATE (display_name)")
 
     # --- medical_images ---
     if create_tenant_table(
@@ -103,9 +106,9 @@ def upgrade() -> None:
             schema=CLINICAL,
         )
     enable_tenant_rls("medical_images")
-    image_rule = f"{ROLE_PRESENT} AND ({CURRENT_ROLE} <> 'patient' OR {OWN_PATIENT_IDS})"
+    image_rule = f"{CLINICAL_ROLE} AND ({CURRENT_ROLE} <> 'patient' OR {OWN_PATIENT_IDS})"
     add_role_policy("medical_images", "images_by_role", image_rule, with_check_sql=image_rule)
-    grant_app("medical_images", "SELECT, INSERT, UPDATE, DELETE")
+    grant_app("medical_images", "SELECT, INSERT, UPDATE (prediction, confidence), DELETE")
 
     # --- audit_log: solo inserción para la app; lectura solo para tenant_admin ---
     if create_tenant_table(

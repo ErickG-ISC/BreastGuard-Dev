@@ -11,7 +11,13 @@ from sqlalchemy import create_engine, inspect, text
 from backend.app.models import clinical, control  # noqa: F401  (registra las tablas)
 from backend.app.models.base import Base
 from tests.helpers import default_password_hash
-from tests.pgtest import OWNER_URL, alembic_config, create_database, drop_database
+from tests.pgtest import (
+    OWNER_URL,
+    alembic_config,
+    create_database,
+    drop_database,
+    ensure_supabase_api_roles,
+)
 
 APP_SCHEMAS = {"control", "clinical"}
 
@@ -19,6 +25,7 @@ APP_SCHEMAS = {"control", "clinical"}
 @pytest.fixture
 def fresh_db(postgres_available):
     name = f"bg_mig_{uuid.uuid4().hex[:10]}"
+    ensure_supabase_api_roles()
     create_database(name)
     url = OWNER_URL.set(database=name).render_as_string(hide_password=False)
     engine = create_engine(url)
@@ -137,3 +144,22 @@ def test_env_no_requiere_database_url_si_recibe_dburl(fresh_db, monkeypatch):
     monkeypatch.delenv("DATABASE_URL")
     command.upgrade(alembic_config(url), "head")
     assert tables(engine, "control") == {"tenants", "users"}
+
+
+def test_downgrade_no_borra_datos_clinicos(fresh_db):
+    url, engine = fresh_db
+    config = alembic_config(url)
+    command.upgrade(config, "head")
+    with engine.begin() as conn:
+        b2c = conn.execute(text("SELECT id FROM control.tenants WHERE slug = 'b2c'")).scalar_one()
+        conn.execute(
+            text(
+                "INSERT INTO clinical.audit_log (tenant_id, actor_id, actor_role, action) "
+                "VALUES (:t, gen_random_uuid(), 'tenant_admin', 'prueba')"
+            ),
+            {"t": b2c},
+        )
+
+    with pytest.raises(RuntimeError, match="tiene datos"):
+        command.downgrade(config, "0003")
+    assert tables(engine, "clinical") == {"patients", "medical_images", "audit_log"}

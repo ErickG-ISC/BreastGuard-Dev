@@ -164,7 +164,25 @@ def revoke_supabase_api_roles() -> None:
     )
 
 
+def assert_bypass(bind) -> None:
+    """Las migraciones que leen o escriben datos clínicos exigen un dueño con BYPASSRLS.
+
+    Con RLS forzado, un dueño sin bypass vería 0 filas sin error: un guard de "tabla vacía"
+    pasaría y un DROP borraría datos reales. Mejor fallar fuerte.
+    """
+    row = bind.execute(
+        sa.text("SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user")
+    ).one()
+    if not (row.rolsuper or row.rolbypassrls):
+        raise RuntimeError(
+            "Esta migración toca datos clínicos y requiere un rol dueño con BYPASSRLS."
+        )
+
+
 def assert_empty(table: str, message: str) -> None:
-    """Para downgrades: se niega a borrar tablas con datos."""
-    if op.get_bind().execute(sa.text(f"SELECT 1 FROM {table} LIMIT 1")).first():
+    """Para downgrades: se niega a borrar tablas con datos (nunca en falso por RLS)."""
+    bind = op.get_bind()
+    if table.startswith(f"{CLINICAL}."):
+        assert_bypass(bind)
+    if bind.execute(sa.text(f"SELECT 1 FROM {table} LIMIT 1")).first():
         raise RuntimeError(message)

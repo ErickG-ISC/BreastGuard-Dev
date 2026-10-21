@@ -7,6 +7,7 @@ from tests.pgtest import (  # isort: skip  (debe ir antes que la app: fija las v
     alembic_config,
     create_database,
     drop_database,
+    ensure_supabase_api_roles,
 )
 
 import os  # noqa: E402
@@ -41,6 +42,7 @@ def postgres_available() -> None:
 @pytest.fixture(scope="session")
 def database(postgres_available):
     """Base temporal migrada a head; se borra al terminar la sesión."""
+    ensure_supabase_api_roles()
     create_database(TEST_DB_NAME)
     try:
         command.upgrade(alembic_config(os.environ["DATABASE_URL"]), "head")

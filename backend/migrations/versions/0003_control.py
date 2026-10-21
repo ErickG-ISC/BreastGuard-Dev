@@ -96,6 +96,25 @@ def upgrade() -> None:
         # Identidad global: el login es solo con email
         op.execute("CREATE UNIQUE INDEX ux_users_email ON control.users (lower(email))")
 
+    # El tenant compartido b2c solo admite pacientes: un médico o admin ahí vería a todas
+    op.execute(
+        """
+        CREATE OR REPLACE FUNCTION control.enforce_b2c_patients() RETURNS trigger
+        LANGUAGE plpgsql AS $$
+        BEGIN
+          IF NEW.role <> 'patient' AND EXISTS (
+               SELECT 1 FROM control.tenants t WHERE t.id = NEW.tenant_id AND t.kind = 'b2c') THEN
+            RAISE EXCEPTION 'El tenant b2c solo admite usuarios con rol patient';
+          END IF;
+          RETURN NEW;
+        END $$
+        """
+    )
+    op.execute("DROP TRIGGER IF EXISTS trg_users_b2c_patients ON control.users")
+    op.execute(
+        "CREATE TRIGGER trg_users_b2c_patients BEFORE INSERT OR UPDATE OF role, tenant_id "
+        "ON control.users FOR EACH ROW EXECUTE FUNCTION control.enforce_b2c_patients()"
+    )
     grant_app("tenants", "SELECT, INSERT, UPDATE (is_active, name, plan)", schema=CONTROL)
     grant_app(
         "users",
@@ -121,4 +140,5 @@ def downgrade() -> None:
             "Hay tenants además de b2c; el downgrade de 0003 no los borra.",
         )
     op.execute("DROP TABLE IF EXISTS control.users")
+    op.execute("DROP FUNCTION IF EXISTS control.enforce_b2c_patients()")
     op.execute("DROP TABLE IF EXISTS control.tenants")

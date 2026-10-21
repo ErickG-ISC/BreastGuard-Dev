@@ -20,7 +20,7 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-from backend.migrations.rls import revoke_supabase_api_roles, table_exists
+from backend.migrations.rls import assert_bypass, revoke_supabase_api_roles, table_exists
 
 revision: str = "0005"
 down_revision: str | None = "0004"
@@ -44,6 +44,7 @@ def upgrade() -> None:
     op.execute("REVOKE ALL ON SCHEMA legacy FROM PUBLIC")
 
     if table_exists("users", "public"):
+        assert_bypass(bind)
         b2c = _b2c_tenant_id(bind)
         counts = bind.execute(
             sa.text(
@@ -68,7 +69,7 @@ def upgrade() -> None:
             ),
             {"b2c": b2c},
         )
-        # Fichas clínicas con el contexto del tenant b2c (por si el dueño no tiene BYPASSRLS)
+        # Fichas clínicas con el contexto del tenant b2c (además de BYPASSRLS, por coherencia)
         bind.execute(sa.text("SELECT set_config('app.tenant_id', :b2c, true)"), {"b2c": b2c})
         bind.execute(
             sa.text(
@@ -117,6 +118,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     bind = op.get_bind()
     if table_exists("users", "legacy"):
+        assert_bypass(bind)
         nuevos = bind.execute(
             sa.text(
                 "SELECT count(*) FROM control.users u "

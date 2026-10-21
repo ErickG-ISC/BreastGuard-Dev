@@ -82,7 +82,11 @@ class MedicalImage(Base):
 
 
 class AuditLog(Base):
-    """Bitácora de solo inserción para la app (sin datos clínicos ni tokens)."""
+    """Bitácora de solo inserción para la app (sin datos clínicos ni tokens).
+
+    Se inserta con `insert()` de Core, sin RETURNING: RETURNING exige pasar la política
+    SELECT, que solo admite tenant_admin. No uses `session.add(AuditLog(...))`.
+    """
 
     __tablename__ = "audit_log"
     __table_args__ = (
