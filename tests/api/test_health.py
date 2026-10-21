@@ -28,15 +28,24 @@ def test_la_api_no_permite_cache_http(client):
     assert response.headers["cache-control"] == "no-store"
 
 
-def test_frontend_origin_tolera_espacios_y_barra_final(monkeypatch):
-    import importlib
+def test_frontend_origin_tolera_errores_de_captura():
+    from backend.app.cors import parse_origins
 
-    import backend.app.main as main
+    raw = ' https://app.vercel.app/ , "breastguardfrontend.vercel.app", localhost:5173,, '
+    assert parse_origins(raw) == [
+        "https://app.vercel.app",
+        "https://breastguardfrontend.vercel.app",
+        "http://localhost:5173",
+    ]
+    assert parse_origins(None) == ["http://localhost:5173"]
+    assert parse_origins("  ") == ["http://localhost:5173"]
 
-    monkeypatch.setenv("FRONTEND_ORIGIN", " https://app.vercel.app/ , http://localhost:5173")
-    reloaded = importlib.reload(main)
-    try:
-        assert reloaded.frontend_origins == ["https://app.vercel.app", "http://localhost:5173"]
-    finally:
-        monkeypatch.undo()
-        importlib.reload(main)
+
+def test_cors_permite_el_origen_configurado(client):
+    from backend.app.main import frontend_origins
+
+    origin = frontend_origins[0]
+    response = client.get("/api/v1/plans", headers={"Origin": origin})
+    assert response.headers["access-control-allow-origin"] == origin
+    blocked = client.get("/api/v1/plans", headers={"Origin": "https://otro.example"})
+    assert "access-control-allow-origin" not in blocked.headers

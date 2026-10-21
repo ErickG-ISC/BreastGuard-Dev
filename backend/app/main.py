@@ -10,6 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.api.v1 import admin, analyses, audit, auth, health, images, onboarding
+from backend.app.cors import parse_origins
 from backend.app.db import assert_safe_db_role
 from backend.app.ml.loader import load_predictor
 from backend.app.ml.service import InferenceService
@@ -39,12 +40,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-# Tolerante a espacios y a la barra final: el navegador envía el origen sin ellos
-frontend_origins = [
-    origin.strip().rstrip("/")
-    for origin in os.environ.get("FRONTEND_ORIGIN", "http://localhost:5173").split(",")
-    if origin.strip()
-]
+# Tolerante a errores de captura (sin https://, comillas, espacios, barra final)
+frontend_origins = parse_origins(os.environ.get("FRONTEND_ORIGIN"))
+# Los orígenes no son secretos: se registran para poder verificar CORS en los logs de Render
+logger.warning("CORS: orígenes permitidos %s", frontend_origins)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=frontend_origins,

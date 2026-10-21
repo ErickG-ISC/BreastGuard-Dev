@@ -28,9 +28,13 @@ export const tokenStore = {
   },
 };
 
-export const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL ?? 'http://localhost:8000/api/v1',
-});
+// Acepta VITE_API_URL con o sin `/api/v1` y con o sin barra final
+export function apiBaseUrl(raw = import.meta.env.VITE_API_URL) {
+  const base = (raw || 'http://localhost:8000').trim().replace(/\/+$/, '');
+  return base.endsWith('/api/v1') ? base : `${base}/api/v1`;
+}
+
+export const api = axios.create({ baseURL: apiBaseUrl() });
 
 api.interceptors.request.use((config) => {
   const token = tokenStore.get();
