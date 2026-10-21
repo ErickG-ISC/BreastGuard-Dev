@@ -37,7 +37,7 @@ Escenario: La Dra. Torres tiene una lista de 40 pacientes activas en la platafor
 Objetivo: Eficiencia operativa del médico que fomenta el uso recurrente de la herramienta (retención B2B). 
 C. Actor: Administrador de plataforma / Tenant 
 CU-12: Alta de un nuevo tenant institucional (clínica/hospital) 
-Escenario: Una clínica privada decide contratar el plan B2B para su equipo de 5 oncólogos. El equipo de administración de la plataforma da de alta un nuevo tenant, lo que provisiona una base de datos física independiente para esa institución, garantizando que sus datos jamás se mezclen con los de otro tenant. 
+Escenario: Una clínica privada decide contratar el plan B2B para su equipo de 5 oncólogos. El equipo de administración de la plataforma da de alta un nuevo tenant, lo que provisiona una aislamiento forzado por la base de datos (RLS) para esa institución, garantizando que sus datos jamás se mezclen con los de otro tenant. 
 Objetivo: Sustenta tu requerimiento de aislamiento total de multitenencia; importante para cumplimiento normativo (datos médicos sensibles). 
 CU-13: Auditoría y control de acceso 
 Escenario: Un administrador de TI de la clínica necesita confirmar quién accedió al expediente de una paciente en los últimos 30 días, por una solicitud de auditoría interna. Consulta el log de accesos del tenant, que solo muestra actividad de ese tenant específico. 
