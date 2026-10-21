@@ -17,7 +17,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import INET, UUID
+from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.app.models.base import Base
@@ -106,3 +106,27 @@ class AuditLog(Base):
     resource_type: Mapped[str | None] = mapped_column(Text)
     resource_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     ip: Mapped[str | None] = mapped_column(INET)
+
+
+class Questionnaire(Base):
+    """Cuestionario de antecedentes (CU-01). Cada envío es una fila nueva (historial)."""
+
+    __tablename__ = "questionnaires"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "patient_id"],
+            ["clinical.patients.tenant_id", "clinical.patients.id"],
+            name="fk_questionnaires_patient",
+        ),
+        Index("ix_questionnaires_patient", "tenant_id", "patient_id", "created_at"),
+        {"schema": "clinical"},
+    )
+
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    id: Mapped[uuid.UUID] = _id()
+    patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    version: Mapped[str] = mapped_column(Text)
+    answers: Mapped[dict] = mapped_column(JSONB)
+    risk_factors: Mapped[list] = mapped_column(JSONB)
+    summary_level: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

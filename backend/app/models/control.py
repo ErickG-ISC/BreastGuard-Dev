@@ -9,12 +9,13 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     Text,
     UniqueConstraint,
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import ARRAY, INET, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.app.models.base import Base
@@ -72,3 +73,62 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Consent(Base):
+    """Consentimiento informado aceptado por un usuario (versión del texto y su hash)."""
+
+    __tablename__ = "consents"
+    __table_args__ = (
+        UniqueConstraint("user_id", "version", name="uq_consents_user_version"),
+        {"schema": "control"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("control.users.id", name="fk_consents_user")
+    )
+    version: Mapped[str] = mapped_column(Text)
+    text_sha256: Mapped[str] = mapped_column(Text)
+    accepted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    ip: Mapped[str | None] = mapped_column(INET)
+
+
+class Plan(Base):
+    """Plan de suscripción SIMULADO: no hay pasarela de pago ni datos de tarjeta."""
+
+    __tablename__ = "plans"
+    __table_args__ = {"schema": "control"}
+
+    code: Mapped[str] = mapped_column(Text, primary_key=True)
+    name: Mapped[str] = mapped_column(Text)
+    description: Mapped[str] = mapped_column(Text)
+    price_label: Mapped[str] = mapped_column(Text)
+    features: Mapped[list[str]] = mapped_column(ARRAY(Text))
+    is_active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    sort: Mapped[int] = mapped_column(Integer, server_default="0")
+
+
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+    __table_args__ = (
+        UniqueConstraint("user_id", name="uq_subscriptions_user"),
+        CheckConstraint("status = 'simulada'", name="ck_subscriptions_status"),
+        {"schema": "control"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("control.users.id", name="fk_subscriptions_user")
+    )
+    plan_code: Mapped[str] = mapped_column(
+        Text, ForeignKey("control.plans.code", name="fk_subscriptions_plan")
+    )
+    status: Mapped[str] = mapped_column(Text, server_default="simulada")
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

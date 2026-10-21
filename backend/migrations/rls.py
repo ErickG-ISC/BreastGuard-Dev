@@ -100,6 +100,20 @@ def add_role_policy(
     op.execute(sql)
 
 
+# Solo los roles clínicos del tenant pasan; un rol nulo o desconocido ve 0 filas
+CLINICAL_ROLE_SQL = f"{CURRENT_ROLE} IN ('patient', 'doctor', 'tenant_admin')"
+
+
+def add_patient_owner_policy(name: str, policy: str) -> None:
+    """Política restrictiva para tablas con `patient_id`: una paciente solo ve y crea lo suyo.
+
+    El personal clínico del tenant (doctor, tenant_admin) ve todas las filas de su tenant.
+    """
+    own = f"patient_id IN (SELECT p.id FROM clinical.patients p WHERE p.user_id = {CURRENT_USER})"
+    rule = f"{CLINICAL_ROLE_SQL} AND ({CURRENT_ROLE} <> 'patient' OR {own})"
+    add_role_policy(name, policy, rule, with_check_sql=rule)
+
+
 def tenant_fk(
     name: str,
     table: str,
