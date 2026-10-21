@@ -130,3 +130,40 @@ class Questionnaire(Base):
     risk_factors: Mapped[list] = mapped_column(JSONB)
     summary_level: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Analysis(Base):
+    """Resultado del análisis de una imagen (CU-02). No se edita: se elimina o se repite."""
+
+    __tablename__ = "analyses"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "patient_id"],
+            ["clinical.patients.tenant_id", "clinical.patients.id"],
+            name="fk_analyses_patient",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "image_id"],
+            ["clinical.medical_images.tenant_id", "clinical.medical_images.id"],
+            name="fk_analyses_image",
+        ),
+        CheckConstraint("status IN ('completed', 'inconclusive')", name="ck_analyses_status"),
+        UniqueConstraint("tenant_id", "image_id", name="uq_analyses_image"),
+        Index("ix_analyses_patient", "tenant_id", "patient_id", "created_at"),
+        {"schema": "clinical"},
+    )
+
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    id: Mapped[uuid.UUID] = _id()
+    patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    image_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    status: Mapped[str] = mapped_column(Text)
+    predicted_class: Mapped[str] = mapped_column(Text)
+    probabilities: Mapped[dict] = mapped_column(JSONB)
+    confidence: Mapped[float] = mapped_column(Float)
+    model_version: Mapped[str] = mapped_column(Text)
+    heatmap_path: Mapped[str] = mapped_column(Text)  # ruta en Storage, nunca una URL
+    quality_flags: Mapped[list] = mapped_column(JSONB)
+    report: Mapped[dict] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
