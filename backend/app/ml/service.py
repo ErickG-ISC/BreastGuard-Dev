@@ -6,7 +6,7 @@ las peticiones que esperen más de queue_timeout_seconds reciben 503.
 
 import asyncio
 import io
-import warnings
+import logging
 from dataclasses import dataclass
 
 import numpy as np
@@ -24,6 +24,12 @@ from backend.app.ml.quality import (
 from backend.app.ml.report import build_report
 from backend.app.ml.runtime import Predictor
 from backend.app.ml.settings import MLSettings
+
+logger = logging.getLogger(__name__)
+
+
+class ModelOutputError(RuntimeError):
+    """El modelo devolvió valores inválidos (NaN, inf o probabilidades que no suman 1)."""
 
 
 @dataclass(frozen=True)
@@ -53,25 +59,26 @@ def prepare_image(data: bytes, settings: MLSettings | None = None) -> Image.Imag
         ]
     )
     try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", Image.DecompressionBombWarning)
-            with Image.open(io.BytesIO(data)) as raw:
-                width, height = raw.size
-                if width * height > settings.max_pixels:
-                    raise ImageQualityError(
-                        [QualityIssue("too_large", "La imagen es demasiado grande.")]
-                    )
-                limit = (settings.max_side_px, settings.max_side_px)
-                raw.draft("RGB", limit)  # JPEG: decodifica ya reducida
-                oriented = ImageOps.exif_transpose(raw)
-                if oriented.mode not in ("RGB", "L"):
-                    oriented = oriented.convert("RGB")
-                oriented.thumbnail(limit, Image.Resampling.LANCZOS)
-                # Reconstruir desde los píxeles crea una imagen sin `info` (EXIF, GPS, ICC, XMP)
-                return Image.fromarray(np.asarray(oriented))
+        # Image.open solo lee la cabecera: el tamaño se valida antes de decodificar píxeles.
+        # max_pixels está muy por debajo del umbral de advertencia de Pillow, así que no hace
+        # falta tocar filtros de warnings (estado global, inseguro entre hilos).
+        with Image.open(io.BytesIO(data)) as raw:
+            width, height = raw.size
+            if width * height > settings.max_pixels:
+                raise ImageQualityError(
+                    [QualityIssue("too_large", "La imagen es demasiado grande.")]
+                )
+            limit = (settings.max_side_px, settings.max_side_px)
+            raw.draft("RGB", limit)  # JPEG: decodifica ya reducida
+            oriented = ImageOps.exif_transpose(raw)
+            if oriented.mode not in ("RGB", "L"):
+                oriented = oriented.convert("RGB")
+            oriented.thumbnail(limit, Image.Resampling.LANCZOS)
+            # Reconstruir desde los píxeles crea una imagen sin `info` (EXIF, GPS, ICC, XMP)
+            return Image.fromarray(np.asarray(oriented))
     except ImageQualityError:
         raise
-    except (Image.DecompressionBombError, Image.DecompressionBombWarning):
+    except Image.DecompressionBombError:
         raise ImageQualityError(
             [QualityIssue("too_large", "La imagen es demasiado grande.")]
         ) from None
@@ -92,6 +99,9 @@ def run_analysis(image: Image.Image, predictor: Predictor, settings: MLSettings)
         raise ImageQualityError(issues)
     prediction = predictor.predict(image)
     flags = prediction_flags(prediction, settings)
+    if "invalid_output" in flags or not np.isfinite(prediction.features).all():
+        # Nunca se reporta ni se guarda una salida inválida del modelo
+        raise ModelOutputError
     heatmap = generate_heatmap(image, predictor, prediction=prediction)
     report = build_report(
         prediction.predicted_class,
@@ -138,6 +148,13 @@ class InferenceService:
             ) from None
         try:
             image = await run_in_threadpool(prepare_image, data, self.settings)
-            return await run_in_threadpool(run_analysis, image, self.predictor, self.settings)
+            try:
+                return await run_in_threadpool(run_analysis, image, self.predictor, self.settings)
+            except ModelOutputError:
+                logger.error("El modelo devolvió una salida inválida; análisis descartado")
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="No se pudo analizar la imagen. Intenta de nuevo más tarde.",
+                ) from None
         finally:
             self._semaphore.release()

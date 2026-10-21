@@ -201,7 +201,11 @@ class TestServicio:
         clean = prepare_image(data)
         assert "exif" not in clean.info
         stored = run_analysis(
-            clean, FakePredictor(ModelCard.from_dict(CARD3), {"normal": 0.9}), SETTINGS
+            clean,
+            FakePredictor(
+                ModelCard.from_dict(CARD3), {"normal": 0.9, "benigno": 0.05, "maligno": 0.05}
+            ),
+            SETTINGS,
         ).clean_image_png
         with Image.open(io.BytesIO(stored)) as saved:
             assert not saved.getexif()
@@ -316,3 +320,40 @@ class TestRevisionDeSeguridad:
         for t in threads:
             t.join()
         assert overlaps == []
+
+
+class TestSalidaInvalidaDeExtremoAExtremo:
+    @pytest.mark.parametrize("bad", [float("nan"), float("inf")])
+    def test_probabilidades_invalidas_no_llegan_a_reporte(self, bad):
+        from backend.app.ml.service import ModelOutputError
+
+        probs = {"normal": bad, "benigno": 0.0, "maligno": 0.0}
+        predictor = FakePredictor(ModelCard.from_dict(CARD3), probs)
+        with pytest.raises(ModelOutputError):
+            run_analysis(ultrasound(), predictor, SETTINGS)
+
+    def test_activaciones_con_nan_no_generan_mapa(self):
+        from backend.app.ml.service import ModelOutputError
+
+        predictor = FakePredictor(
+            ModelCard.from_dict(CARD3), {"normal": 0.9, "benigno": 0.05, "maligno": 0.05}
+        )
+        predictor._features = np.full((7, 7, 8), np.nan, dtype=np.float32)
+        with pytest.raises(ModelOutputError):
+            run_analysis(ultrasound(), predictor, SETTINGS)
+
+    def test_el_servicio_responde_503_controlado(self):
+        predictor = FakePredictor(
+            ModelCard.from_dict(CARD3), {"normal": float("nan"), "benigno": 0.0, "maligno": 0.0}
+        )
+        service = InferenceService(predictor, SETTINGS)
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(service.analyze(png_bytes(ultrasound())))
+        assert exc.value.status_code == 503
+
+    def test_lock_se_crea_en_el_constructor(self):
+        import inspect
+
+        from backend.app.ml.runtime import LiteRTPredictor
+
+        assert "self._lock = threading.Lock()" in inspect.getsource(LiteRTPredictor.__init__)
