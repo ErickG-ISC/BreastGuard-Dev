@@ -36,3 +36,23 @@ class SupabaseStorage:
             logger.error("Fallo al subir un objeto a Storage (%s)", type(exc).__name__)
             raise StorageError from exc
         return bucket.get_public_url(object_name)
+
+    def remove_prefix(self, prefix: str) -> int:
+        """Borra todos los objetos bajo un prefijo de tenant (`{slug}/`). Solo para la purga."""
+        if not prefix.endswith("/") or prefix.count("/") != 1:
+            raise ValueError("El prefijo debe ser exactamente '{slug}/'")
+        bucket = _get_client().storage.from_(self.bucket)
+        paths: list[str] = []
+        pending = [prefix.rstrip("/")]
+        while pending:
+            folder = pending.pop()
+            for entry in bucket.list(folder):
+                path = f"{folder}/{entry['name']}"
+                # En Supabase, las "carpetas" se listan sin id
+                if entry.get("id") is None:
+                    pending.append(path)
+                else:
+                    paths.append(path)
+        for start in range(0, len(paths), 100):
+            bucket.remove(paths[start : start + 100])
+        return len(paths)
