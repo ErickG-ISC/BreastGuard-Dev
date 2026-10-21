@@ -11,6 +11,7 @@ from typing import NoReturn
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from backend.app.ml.quality import ImageQualityError
@@ -132,13 +133,20 @@ async def create(
     return analysis
 
 
+def _own(auth: AuthContext):
+    """Pertenencia explícita además de RLS: solo los análisis de la ficha de esta paciente."""
+    own_patient = select(Patient.id).where(Patient.user_id == auth.user_id).scalar_subquery()
+    return Analysis.patient_id == own_patient
+
+
 def list_page(
     db: Session, auth: AuthContext, limit: int, offset: int, ip: str | None
 ) -> tuple[list[Analysis], int]:
-    total = db.scalar(select(func.count()).select_from(Analysis))
+    total = db.scalar(select(func.count()).select_from(Analysis).where(_own(auth)))
     items = list(
         db.scalars(
             select(Analysis)
+            .where(_own(auth))
             .order_by(Analysis.created_at.desc(), Analysis.id)
             .limit(limit)
             .offset(offset)
@@ -156,7 +164,7 @@ def _load(db: Session, auth: AuthContext, analysis_id: uuid.UUID, ip: str | None
             MedicalImage,
             (MedicalImage.tenant_id == Analysis.tenant_id) & (MedicalImage.id == Analysis.image_id),
         )
-        .where(Analysis.id == analysis_id)
+        .where(Analysis.id == analysis_id, _own(auth))
     ).first()
     if row is None:
         _deny(db, auth, analysis_id, ip)
@@ -209,9 +217,18 @@ def delete(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="No se pudo eliminar. Intenta de nuevo.",
         ) from None
-    db.delete(analysis)
-    db.flush()
-    db.delete(image)
-    db.flush()
-    _audit(db, auth, "analysis.delete", analysis_id, ip)
-    db.commit()
+    try:
+        db.delete(analysis)
+        db.flush()
+        db.delete(image)
+        db.flush()
+        _audit(db, auth, "analysis.delete", analysis_id, ip)
+        db.commit()
+    except SQLAlchemyError:
+        # Los archivos ya no están; reintentar es seguro (borrar en Storage es idempotente)
+        db.rollback()
+        logger.error("Fallo al borrar las filas de un análisis tras borrar sus archivos")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="No se pudo completar la eliminación. Intenta de nuevo.",
+        ) from None

@@ -3,7 +3,17 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Query, Request, Response, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 
 from backend.app.api.client_ip import client_ip
 from backend.app.api.deps import Storage, TenantDb, require_role
@@ -36,9 +46,15 @@ async def create_analysis(
     image = await read_and_validate_image(file)
     ip = client_ip(request)
     created = await analyses.create(db, storage, inference, auth, image, ip)
-    analysis, image_url, heatmap_url, ttl = analyses.get_with_urls(
-        db, storage, auth, created.id, ip
-    )
+    base = AnalysisOut.model_validate(created).model_dump()
+    try:
+        analysis, image_url, heatmap_url, ttl = analyses.get_with_urls(
+            db, storage, auth, created.id, ip
+        )
+    except HTTPException:
+        # El análisis ya quedó guardado: no se responde error (provocaría un duplicado al
+        # reintentar); el cliente pide las URLs después con GET /analyses/{id}
+        return AnalysisDetailOut(**base, image_url=None, heatmap_url=None, url_expires_in=0)
     return AnalysisDetailOut(
         **AnalysisOut.model_validate(analysis).model_dump(),
         image_url=image_url,
@@ -47,7 +63,11 @@ async def create_analysis(
     )
 
 
-@router.get("", response_model=AnalysisPage)
+@router.get(
+    "",
+    response_model=AnalysisPage,
+    dependencies=[Depends(rate_limit("analyses_read", 60, 60))],
+)
 def list_analyses(
     auth: PatientUser,
     db: TenantDb,
@@ -64,7 +84,11 @@ def list_analyses(
     )
 
 
-@router.get("/{analysis_id}", response_model=AnalysisDetailOut)
+@router.get(
+    "/{analysis_id}",
+    response_model=AnalysisDetailOut,
+    dependencies=[Depends(rate_limit("analyses_read", 60, 60))],
+)
 def get_analysis(
     analysis_id: uuid.UUID, auth: PatientUser, db: TenantDb, storage: Storage, request: Request
 ):
@@ -79,7 +103,11 @@ def get_analysis(
     )
 
 
-@router.delete("/{analysis_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{analysis_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(rate_limit("analyses_delete", 20, 60))],
+)
 def delete_analysis(
     analysis_id: uuid.UUID, auth: PatientUser, db: TenantDb, storage: Storage, request: Request
 ):

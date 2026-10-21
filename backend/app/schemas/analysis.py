@@ -21,8 +21,9 @@ class AnalysisOut(BaseModel):
 
 
 class AnalysisDetailOut(AnalysisOut):
-    image_url: str
-    heatmap_url: str
+    # None si no se pudieron firmar al crear: el cliente las pide con GET /analyses/{id}
+    image_url: str | None
+    heatmap_url: str | None
     url_expires_in: int
 
 

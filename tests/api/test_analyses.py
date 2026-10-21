@@ -186,3 +186,87 @@ class TestEliminar:
         assert client.delete(f"{URL}/{analysis_id}", headers=auth_headers(bea)).status_code == 404
         assert len(storage.objects) == 2
         assert len(rows(owner_engine, "SELECT 1 FROM clinical.analyses")) == 1
+
+
+class TestRevisionCU02:
+    def test_otro_tenant_no_borra_ni_lee_con_id_real(
+        self, client, ana, tenant_factory, user_factory, storage, owner_engine
+    ):
+        analysis_id = upload(client, ana).json()["id"]
+        stored = dict(storage.objects)
+        storage.signed.clear()
+        other = user_factory(tenant_factory("clinica-b"), role="patient")
+        detail = client.get(f"{URL}/{analysis_id}", headers=auth_headers(other))
+        delete = client.delete(f"{URL}/{analysis_id}", headers=auth_headers(other))
+        assert detail.status_code == delete.status_code == 404
+        assert storage.signed == []
+        assert storage.objects == stored
+        assert len(rows(owner_engine, "SELECT 1 FROM clinical.analyses")) == 1
+
+    def test_total_no_cuenta_otro_tenant_poblado(self, client, ana, tenant_factory, user_factory):
+        other = user_factory(tenant_factory("clinica-b"), role="patient")
+        for _ in range(2):
+            upload(client, other)
+        upload(client, ana)
+        assert client.get(URL, headers=auth_headers(ana)).json()["total"] == 1
+        assert client.get(URL, headers=auth_headers(other)).json()["total"] == 2
+
+    def test_si_falla_el_heatmap_se_borra_la_imagen_ya_subida(
+        self, client, ana, storage, owner_engine
+    ):
+        storage.fail_on = "/heatmaps/"
+        assert upload(client, ana).status_code == 502
+        assert storage.objects == {}
+        assert rows(owner_engine, "SELECT 1 FROM clinical.analyses") == []
+
+    def test_si_falla_la_base_se_limpian_ambos_objetos(
+        self, client, ana, storage, owner_engine, monkeypatch
+    ):
+        from backend.app.services import analyses as service
+
+        def boom(*args, **kwargs):
+            raise RuntimeError("fallo simulado al auditar")
+
+        monkeypatch.setattr(service, "_audit", boom)
+        with pytest.raises(RuntimeError):
+            upload(client, ana)
+        assert storage.objects == {}
+        assert rows(owner_engine, "SELECT 1 FROM clinical.analyses") == []
+        assert rows(owner_engine, "SELECT 1 FROM clinical.medical_images") == []
+
+    def test_si_falla_la_firma_al_crear_responde_201_sin_urls(self, client, ana, storage):
+        storage.fail_sign = True
+        response = upload(client, ana)
+        assert response.status_code == 201
+        assert response.json()["image_url"] is None
+        storage.fail_sign = False
+        analysis_id = response.json()["id"]
+        detail = client.get(f"{URL}/{analysis_id}", headers=auth_headers(ana))
+        assert detail.json()["image_url"].startswith("https://storage.test/signed/")
+
+    @pytest.mark.parametrize("role", ["doctor", "tenant_admin"])
+    def test_personal_no_lee_ni_borra(self, client, tenant_factory, user_factory, role):
+        clinic = tenant_factory("clinica-a")
+        patient = user_factory(clinic, role="patient")
+        staff = user_factory(clinic, role=role)
+        analysis_id = upload(client, patient).json()["id"]
+        assert client.get(URL, headers=auth_headers(staff)).status_code == 403
+        assert client.get(f"{URL}/{analysis_id}", headers=auth_headers(staff)).status_code == 403
+        assert client.delete(f"{URL}/{analysis_id}", headers=auth_headers(staff)).status_code == 403
+
+    def test_borrado_repetido_es_404(self, client, ana):
+        analysis_id = upload(client, ana).json()["id"]
+        assert client.delete(f"{URL}/{analysis_id}", headers=auth_headers(ana)).status_code == 204
+        assert client.delete(f"{URL}/{analysis_id}", headers=auth_headers(ana)).status_code == 404
+
+    def test_auditoria_sin_datos_clinicos(self, client, ana, owner_engine):
+        analysis_id = upload(client, ana).json()["id"]
+        client.get(URL, headers=auth_headers(ana))
+        client.get(f"{URL}/{analysis_id}", headers=auth_headers(ana))
+        client.delete(f"{URL}/{analysis_id}", headers=auth_headers(ana))
+        audit = rows(owner_engine, "SELECT * FROM clinical.audit_log")
+        actions = {r.action for r in audit}
+        assert {"analysis.create", "analysis.list", "analysis.read", "analysis.delete"} <= actions
+        dump = " ".join(str(v) for r in audit for v in r).lower()
+        for clinical in ("normal", "benigno", "maligno", "heatmaps", "images/", "confianza"):
+            assert clinical not in dump

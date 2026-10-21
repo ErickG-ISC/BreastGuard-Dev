@@ -104,6 +104,8 @@ class FakeStorage:
         self.removed: list[str] = []
         self.fail = False
         self.fail_remove = False
+        self.fail_on: str | None = None
+        self.fail_sign = False
 
     def upload_file(self, file_path: str, object_name: str, content_type: str) -> None:
         self.uploaded_from.append(file_path)
@@ -113,7 +115,7 @@ class FakeStorage:
             self.objects[object_name] = f.read()
 
     def upload_bytes(self, object_name: str, data: bytes, content_type: str) -> None:
-        if self.fail:
+        if self.fail or (self.fail_on and self.fail_on in object_name):
             raise StorageError
         self.objects[object_name] = data
 
@@ -125,6 +127,8 @@ class FakeStorage:
         self.removed.extend(object_names)
 
     def create_signed_url(self, object_name: str, expires_in: int) -> str:
+        if self.fail_sign:
+            raise StorageError
         self.signed.append(object_name)
         return f"https://storage.test/signed/{object_name}?expires_in={expires_in}"
 
