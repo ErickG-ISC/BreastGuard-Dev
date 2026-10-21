@@ -2,6 +2,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import logging
 import os
 from contextlib import asynccontextmanager
 
@@ -10,12 +11,29 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.api.v1 import admin, audit, auth, health, images, onboarding
 from backend.app.db import assert_safe_db_role
+from backend.app.ml.loader import load_predictor
+from backend.app.ml.service import InferenceService
+from backend.app.ml.settings import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Falla cerrado: sin rol seguro (no superusuario, no BYPASSRLS) la app no arranca
     assert_safe_db_role()
+    # El modelo se carga UNA vez aquí, nunca por petición. Si falla, la app arranca igual y
+    # el análisis responde 503 (lo indica /health).
+    settings = get_settings()
+    predictor = None
+    if settings.load_on_startup:
+        try:
+            predictor = load_predictor(settings)
+        except Exception as exc:
+            logger.error(
+                "No se pudo cargar el modelo (%s); análisis no disponible", type(exc).__name__
+            )
+    app.state.inference = InferenceService(predictor, settings)
     yield
 
 
