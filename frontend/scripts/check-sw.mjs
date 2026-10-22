@@ -10,6 +10,15 @@ for (const strategy of ['CacheFirst', 'NetworkFirst', 'StaleWhileRevalidate', 'C
   if (sw.includes(strategy)) errors.push(`sw.js usa la estrategia de caché ${strategy}`);
 }
 
+// Ni manejadores de fetch propios ni acceso directo a la Cache API
+for (const pattern of [/addEventListener\(\s*["']fetch["']/, /caches\.open\(/, /setCatchHandler|setDefaultHandler/]) {
+  if (pattern.test(sw)) errors.push(`sw.js contiene ${pattern}`);
+}
+
+// La configuración fuente también debe declarar que no hay caché en tiempo de ejecución
+const config = readFileSync(new URL('../vite.config.js', import.meta.url), 'utf8');
+if (!/runtimeCaching:\s*\[\s*\]/.test(config)) errors.push('vite.config.js debe tener runtimeCaching: []');
+
 // La única ruta registrada es la navegación de la SPA, con /api/ excluido
 const routes = sw.match(/registerRoute\(/g) ?? [];
 if (routes.length !== 1 || !sw.includes('NavigationRoute')) {
