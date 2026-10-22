@@ -18,7 +18,6 @@ import {
 import { useCallback, useEffect, useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import { api, errorMessage } from '../../api/client';
-import Layout from '../../components/Layout';
 import { LEVEL_SEVERITY, formatDate, resultLabel } from './analysisLabels';
 
 const PAGE = 10;
@@ -62,7 +61,7 @@ export default function History() {
   }
 
   return (
-    <Layout>
+    <>
       <Stack spacing={2}>
         <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', gap: 1, flexWrap: 'wrap' }}>
           <Typography variant="h5" component="h1">
@@ -133,6 +132,6 @@ export default function History() {
           </Button>
         </DialogActions>
       </Dialog>
-    </Layout>
+    </>
   );
 }
