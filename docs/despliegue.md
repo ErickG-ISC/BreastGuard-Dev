@@ -41,6 +41,13 @@ La app **no arranca** (falla cerrado, es intencional):
 Desde tu computadora, con el `.env` apuntando a la misma base:
 `python -m backend.scripts.create_platform_admin --email tu@correo.com --name "Tu nombre"`
 
+## Pruebas en CI (GitHub Actions)
+
+`.github/workflows/ci.yml` corre dos jobs en cada push y PR:
+
+- **backend**: levanta un servicio `postgres:17` en el puerto 54329 y define `TEST_DATABASE_URL`. `tests/pgtest.py` crea una base temporal, aplica las migraciones con Alembic y crea el rol de prueba de la app (`bg_app_test`, NOSUPERUSER NOBYPASSRLS), así que las pruebas de RLS corren contra Postgres real, igual que en local con `docker compose up -d db`. `REQUIRE_POSTGRES=1` hace que fallen (en vez de omitirse) si la base no responde. Luego `ruff check`, `ruff format --check` y `pytest -q`.
+- **frontend**: `npm ci`, `npm run lint` (oxlint), `npm run build` y `npm run check:sw`, que verifica que el service worker solo precachee archivos estáticos y no guarde respuestas de la API ni imágenes.
+
 ## Problemas comunes
 - **`model: unavailable` en `/health`:** el bucket o el prefijo están mal, o el modelo no se subió. Revisa los logs de Render; solo registran el tipo de error.
 - **Error de CORS en el navegador:** `FRONTEND_ORIGIN` no coincide con el dominio exacto de Vercel.
