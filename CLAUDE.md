@@ -24,7 +24,7 @@ Prioridad de implementación acordada: **1) multitenencia (CU-12, CU-13), 2) B2C
 - `docker-compose.yml` — Postgres 17 local para pruebas (puerto 54329)
 - `infraestructure/` — reservado para despliegue/IaC; todavía no existe en el repo (git no guarda carpetas vacías). El nombre lleva ese typo a propósito; no renombrar sin avisar
 - `docs/` — casos de uso (`casos-de-uso.md`) y decisiones de arquitectura (`adr/`). El guion de demo está pendiente
-- `.github/workflows/ci.yml` — CI: ruff y pytest en cada push y PR (Python 3.12, sin TensorFlow)
+- `.github/workflows/ci.yml` — CI en cada push y PR: job `backend` (ruff y pytest contra un servicio Postgres 17, Python 3.12, sin TensorFlow) y job `frontend` (`npm ci`, oxlint, build y `npm run check:sw`)
 
 El repo se inicializó con git localmente en la Fase 0 (venía de un ZIP); el remoto se conecta a mano.
 
@@ -88,7 +88,7 @@ Reglas de infraestructura:
 
 ### Backend (`backend/app`)
 
-- `main.py`: carga `.env`, crea `FastAPI()`, agrega `CORSMiddleware` (orígenes de `FRONTEND_ORIGIN`, separados por coma) y monta tres routers bajo `/api/v1`: `health`, `auth` (`/auth`) e `images` (`/images`).
+- `main.py`: carga `.env`, crea `FastAPI()`, agrega `CORSMiddleware` (orígenes de `FRONTEND_ORIGIN`, separados por comas o espacios/saltos de línea; ver `cors.py`) y monta tres routers bajo `/api/v1`: `health`, `auth` (`/auth`) e `images` (`/images`).
 - `db.py`: conexión de la app. Hay un solo engine, con el rol `app_user` (URL derivada de `DATABASE_URL` + `APP_DB_PASSWORD`, o `APP_DATABASE_URL`) y pool pequeño. `new_session(context)` crea sesiones; el listener `after_begin` aplica `set_config('app.tenant_id' | 'app.user_id' | 'app.role', ..., true)` en cada transacción. `assert_safe_db_role()` corre en el lifespan: la app no arranca con un rol superusuario, BYPASSRLS o distinto de `APP_DB_USER`.
 - `models/base.py`: `Base` declarativa. `models/control.py` (`Tenant`, `User`) y `models/clinical.py` (`Patient`, `MedicalImage`, `AuditLog`). En `clinical`, `tenant_id` lo pone la base desde el contexto; el código no lo asigna.
 - `api/deps.py`:
@@ -129,11 +129,15 @@ Reglas de infraestructura:
 
 ### Frontend (`frontend/src`)
 
-SPA estándar: `main.jsx` monta `App.jsx` (tema MUI, `AuthProvider` y rutas con `react-router-dom`). UI con MUI (`@mui/material`, `@emotion/*`) y `axios`. Lint con `oxlint`.
+SPA estándar: `main.jsx` monta `App.jsx` (tema, `AuthProvider` y rutas con `react-router-dom`). UI con MUI (`@mui/material`, `@emotion/*`) y `axios`. Lint con `oxlint`.
+- `theme.js`: **tema único** (paleta clara/oscura, tipografía del sistema, radios, botones, campos, tarjetas). Las páginas no definen colores ni radios propios; el fondo de visores de imagen es `imaging.main`.
+- `components/icons.jsx`: íconos de Material como `SvgIcon` (sin `@mui/icons-material`).
+- `components/PatientShell.jsx` + `patientNav.js`: app de paciente con barra inferior en móvil (Inicio, Analizar, Historial, Diario, Más) y barra lateral en escritorio (≥ md), según `docs/wireframes/`. Las rutas de paciente son hijas del shell (`<Outlet/>`); `Layout.jsx` queda para páginas públicas y de administración.
+- PWA con `vite-plugin-pwa`: solo precache de estáticos; `scripts/check-sw.mjs` (`npm run check:sw`) falla si el SW cachea algo más.
 - `api/client.js`: axios con el Bearer del JWT, guardado en `sessionStorage`; un 401 cierra la sesión.
 - `auth/AuthContext.jsx`: login (`/auth/token`) y el usuario actual (`/auth/me`).
 - `components/ProtectedRoute.jsx` (por rol) y `components/Layout.jsx`, con el aviso de herramienta de apoyo.
-- Rutas: `/`, `/login` y `/admin/tenants` (`platform_admin`: crear institución, activar/desactivar y chequeo de aislamiento).
+- Rutas públicas: `/`, `/login`, `/registro`. Paciente: `/paciente`, `/cuestionario`, `/analizar`, `/resultado/:id`, `/historial`, `/diario`, `/mas`. `platform_admin`: `/admin/tenants` (crear institución, activar/desactivar y chequeo de aislamiento).
 
 ### Brechas conocidas (resolver en este orden)
 

@@ -2,7 +2,6 @@ import { Alert, Box, Button, LinearProgress, Paper, Stack, Typography } from '@m
 import { useEffect, useRef, useState } from 'react';
 import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import { api, errorMessage } from '../../api/client';
-import Layout from '../../components/Layout';
 import { ImageGuide } from './PatientHome';
 
 const MAX_MB = 10;
@@ -63,7 +62,7 @@ export default function Analyze() {
   const busy = phase !== 'idle';
 
   return (
-    <Layout>
+    <>
       <Stack spacing={2}>
         <Typography variant="h5" component="h1">
           Analizar una ecografía
@@ -86,7 +85,7 @@ export default function Analyze() {
                 component="img"
                 src={preview}
                 alt="Vista previa de la ecografía seleccionada"
-                sx={{ width: '100%', maxHeight: 360, objectFit: 'contain', bgcolor: 'black', borderRadius: 1 }}
+                sx={{ width: '100%', maxHeight: 360, objectFit: 'contain', bgcolor: 'imaging.main', borderRadius: 1 }}
               />
             )}
             {busy && (
@@ -112,6 +111,6 @@ export default function Analyze() {
         </Paper>
         <ImageGuide />
       </Stack>
-    </Layout>
+    </>
   );
 }

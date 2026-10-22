@@ -19,7 +19,6 @@ import {
 import { useEffect, useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import { api, errorMessage } from '../../api/client';
-import Layout from '../../components/Layout';
 
 function initialAnswers(questions) {
   const answers = {};
@@ -158,7 +157,7 @@ export default function Questionnaire() {
   }
 
   return (
-    <Layout>
+    <>
       <Paper sx={{ p: { xs: 2, sm: 3 } }}>
         <Typography variant="h5" component="h1" sx={{ mb: 1 }}>
           Cuestionario de antecedentes
@@ -199,6 +198,6 @@ export default function Questionnaire() {
           </Stack>
         )}
       </Paper>
-    </Layout>
+    </>
   );
 }

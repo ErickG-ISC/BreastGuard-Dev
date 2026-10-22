@@ -1,8 +1,8 @@
-import { Alert, Button, Card, CardContent, Chip, Stack, Typography } from '@mui/material';
+import { Alert, Box, Button, Card, CardContent, Chip, Stack, Typography } from '@mui/material';
 import { useEffect, useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import { api } from '../../api/client';
-import Layout, { DISCLAIMER } from '../../components/Layout';
+import { DISCLAIMER } from '../../components/Layout';
 import { QuestionnaireResult } from './Questionnaire';
 
 export function ImageGuide() {
@@ -13,7 +13,7 @@ export function ImageGuide() {
           ¿Qué imágenes puedo subir?
         </Typography>
         <Typography variant="body2" component="div">
-          <ul style={{ paddingLeft: '1.2rem', margin: 0 }}>
+          <Box component="ul" sx={{ pl: 2.5, m: 0 }}>
             <li>
               <strong>Ecografías (ultrasonido) de mama</strong>, como las que entrega la clínica en JPG o PNG. El modelo se
               entrenó con ecografías tipo BUSI.
@@ -24,7 +24,7 @@ export function ImageGuide() {
               aplicación las rechazará.
             </li>
             <li>Usa solo imágenes tuyas o de las que tengas autorización.</li>
-          </ul>
+          </Box>
         </Typography>
         <Alert severity="warning" sx={{ mt: 2 }}>
           {DISCLAIMER}
@@ -47,7 +47,7 @@ export default function PatientHome() {
   }, []);
 
   return (
-    <Layout>
+    <>
       <Stack spacing={2}>
         <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', gap: 1, flexWrap: 'wrap' }}>
           <Typography variant="h5" component="h1">
@@ -97,6 +97,6 @@ export default function PatientHome() {
 
         <ImageGuide />
       </Stack>
-    </Layout>
+    </>
   );
 }
