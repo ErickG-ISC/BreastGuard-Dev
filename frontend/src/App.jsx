@@ -1,6 +1,7 @@
-import { CssBaseline, ThemeProvider, createTheme } from '@mui/material';
+import { CssBaseline, ThemeProvider } from '@mui/material';
 import { BrowserRouter as Router, Navigate, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from './auth/AuthContext';
+import PatientShell from './components/PatientShell';
 import ProtectedRoute from './components/ProtectedRoute';
 import Home from './pages/Home';
 import Login from './pages/Login';
@@ -10,12 +11,10 @@ import Questionnaire from './pages/patient/Questionnaire';
 import Analyze from './pages/patient/Analyze';
 import Result from './pages/patient/Result';
 import History from './pages/patient/History';
+import Diary from './pages/patient/Diary';
+import More from './pages/patient/More';
 import Tenants from './pages/admin/Tenants';
-
-const theme = createTheme({
-  colorSchemes: { light: true, dark: true },
-  palette: { primary: { main: '#b0306a' } },
-});
+import theme from './theme';
 
 function App() {
   return (
@@ -28,22 +27,6 @@ function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/registro" element={<Register />} />
             <Route
-              path="/paciente"
-              element={
-                <ProtectedRoute roles={['patient']}>
-                  <PatientHome />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/cuestionario"
-              element={
-                <ProtectedRoute roles={['patient']}>
-                  <Questionnaire />
-                </ProtectedRoute>
-              }
-            />
-            <Route
               path="/admin/tenants"
               element={
                 <ProtectedRoute roles={['platform_admin']}>
@@ -51,30 +34,22 @@ function App() {
                 </ProtectedRoute>
               }
             />
+            {/* App de paciente: barra inferior en móvil, barra lateral en escritorio */}
             <Route
-              path="/analizar"
               element={
                 <ProtectedRoute roles={['patient']}>
-                  <Analyze />
+                  <PatientShell />
                 </ProtectedRoute>
               }
-            />
-            <Route
-              path="/resultado/:id"
-              element={
-                <ProtectedRoute roles={['patient']}>
-                  <Result />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/historial"
-              element={
-                <ProtectedRoute roles={['patient']}>
-                  <History />
-                </ProtectedRoute>
-              }
-            />
+            >
+              <Route path="/paciente" element={<PatientHome />} />
+              <Route path="/cuestionario" element={<Questionnaire />} />
+              <Route path="/analizar" element={<Analyze />} />
+              <Route path="/resultado/:id" element={<Result />} />
+              <Route path="/historial" element={<History />} />
+              <Route path="/diario" element={<Diary />} />
+              <Route path="/mas" element={<More />} />
+            </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Router>

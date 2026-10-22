@@ -9,13 +9,13 @@ export default function Layout({ children }) {
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
-      <AppBar position="static" elevation={0}>
+      <AppBar position="static" sx={{ borderBottom: 1, borderColor: 'divider' }}>
         <Toolbar sx={{ gap: 1 }}>
-          <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
+          <Typography variant="h6" component="div" color="primary" sx={{ flexGrow: 1 }}>
             BreastGuard
           </Typography>
           {user && (
-            <Button color="inherit" onClick={logout}>
+            <Button onClick={logout}>
               Salir
             </Button>
           )}

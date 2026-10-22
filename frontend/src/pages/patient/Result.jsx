@@ -15,7 +15,6 @@ import {
 import { useCallback, useEffect, useState } from 'react';
 import { Link as RouterLink, useLocation, useParams } from 'react-router-dom';
 import { api, errorMessage } from '../../api/client';
-import Layout from '../../components/Layout';
 import { CLASS_LABELS, LEVEL_SEVERITY, formatDate, resultLabel } from './analysisLabels';
 
 function HeatmapViewer({ imageUrl, heatmapUrl, onExpired }) {
@@ -30,7 +29,7 @@ function HeatmapViewer({ imageUrl, heatmapUrl, onExpired }) {
   };
   return (
     <Stack spacing={1}>
-      <Box sx={{ position: 'relative', width: '100%', bgcolor: 'black', borderRadius: 1, overflow: 'hidden' }}>
+      <Box sx={{ position: 'relative', width: '100%', bgcolor: 'imaging.main', borderRadius: 1, overflow: 'hidden' }}>
         <Box component="img" src={imageUrl} alt="Ecografía analizada" onError={handleError} sx={{ display: 'block', width: '100%' }} />
         <Box
           component="img"
@@ -72,27 +71,27 @@ export default function Result() {
 
   if (error) {
     return (
-      <Layout>
+      <>
         <Alert severity="error">{error}</Alert>
         <Button component={RouterLink} to="/historial" sx={{ mt: 2 }}>
           Ir al historial
         </Button>
-      </Layout>
+      </>
     );
   }
   if (!analysis) {
     return (
-      <Layout>
+      <>
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
           <CircularProgress />
         </Box>
-      </Layout>
+      </>
     );
   }
 
   const { report } = analysis;
   return (
-    <Layout>
+    <>
       <Stack spacing={2}>
         {report.demo_notice && <Alert severity="warning">{report.demo_notice}</Alert>}
         <Paper sx={{ p: { xs: 2, sm: 3 } }}>
@@ -155,6 +154,6 @@ export default function Result() {
           </Button>
         </Stack>
       </Stack>
-    </Layout>
+    </>
   );
 }
