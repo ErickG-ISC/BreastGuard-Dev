@@ -41,6 +41,16 @@ La app **no arranca** (falla cerrado, es intencional):
 Desde tu computadora, con el `.env` apuntando a la misma base:
 `python -m backend.scripts.create_platform_admin --email tu@correo.com --name "Tu nombre"`
 
+## 4. Recordatorios (CU-05)
+
+1. Genera un secreto (no lo pegues en ningún chat): `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
+2. Render → Environment: `REMINDER_CRON_SECRET` (ese valor), `PUBLIC_APP_URL` (la URL de Vercel) y `EMAIL_BACKEND=console`.
+3. GitHub → Settings → Secrets and variables → Actions:
+   - Secret `REMINDER_CRON_SECRET` con el mismo valor.
+   - Variable `API_URL` con la URL de Render, sin `/api/v1`.
+4. Actions → "Recordatorios" → **Run workflow** para probarlo; luego corre solo cada 15 minutos (GitHub puede retrasarlo unos minutos).
+5. En la base de Supabase de desarrollo: `alembic -c backend/alembic.ini upgrade head` (crea 0009–0011).
+
 ## Pruebas en CI (GitHub Actions)
 
 `.github/workflows/ci.yml` corre dos jobs en cada push y PR:
