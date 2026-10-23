@@ -132,6 +132,7 @@ Reglas de infraestructura:
   - `services/reminder_schedule.py`: `next_run` puro (primer domingo, cada N días, cada N meses; zonas IANA con `tzdata`; huecos de horario hacia adelante, horas ambiguas a la primera).
   - Despachador `POST /internal/reminders/dispatch` (header `X-Cron-Secret` = `REMINDER_CRON_SECRET`, 32+ caracteres; sin él responde 503): `FOR UPDATE SKIP LOCKED` + `UNIQUE (reminder_id, due_at)`, un aviso aunque haya atrasos, correo fuera de la transacción. Usa la sesión de control sin contexto: nunca ve `clinical`. Lo llama `.github/workflows/reminders.yml` cada 15 min (secret `REMINDER_CRON_SECRET` y variable `API_URL` en GitHub). Local: `python -m backend.scripts.dispatch_reminders`.
   - `services/email.py`: solo `EMAIL_BACKEND=console` (registra destinatario enmascarado y asunto). Modo discreto por defecto: sin marca ni tema. Siempre lleva enlace de baja (`PUBLIC_APP_URL/baja?token=`).
+- `api/v1/blog.py` + `services/blog.py` (CU-06, público, sin tenant): `GET /blog`, `GET /blog/faq` y `GET /blog/{slug}`. Artículos en `content/blog/*.md` con metadatos entre `---` (parser propio, sin PyYAML; se validan al arrancar). Sin `revisado_por` la UI muestra "Contenido educativo general · borrador", nunca "validado". "Recomendado para ti" lo arma el frontend con `GET /analyses?limit=1`. Lo pendiente de revisión médica está en `docs/contenido-pendiente-de-revision.md`.
 - `api/v1/images.py`: `POST /upload` (paciente), `GET /images` y `GET /images/{id}` (con URL firmada; ajena o inexistente da el mismo 404). Lecturas, subidas y accesos denegados (`image.denied`) auditados.
 - `api/v1/audit.py`: `GET /audit` para `tenant_admin` con filtros `from`, `to`, `actor_id`, `limit` y `offset`.
 - `api/rate_limit.py`: límites por IP y ruta: `/auth/token` 10/min, `/auth/register` 5/min, `/images/upload` 20/min. La IP sale de `api/client_ip.py`: ignora `X-Forwarded-For` salvo con `TRUSTED_PROXY_HOPS` (en Render, `1`; ver ADR 0004).
@@ -150,7 +151,7 @@ SPA estándar: `main.jsx` monta `App.jsx` (tema, `AuthProvider` y rutas con `rea
 - `api/client.js`: axios con el Bearer del JWT, guardado en `sessionStorage`; un 401 cierra la sesión.
 - `auth/AuthContext.jsx`: login (`/auth/token`) y el usuario actual (`/auth/me`).
 - `components/ProtectedRoute.jsx` (por rol) y `components/Layout.jsx`, con el aviso de herramienta de apoyo.
-- Rutas públicas: `/`, `/login`, `/registro`. Paciente: `/paciente`, `/cuestionario`, `/analizar`, `/resultado/:id`, `/historial`, `/diario`, `/mas`, `/autoexploracion`, `/recordatorios`. Pública: `/baja` (confirmar baja del correo). `platform_admin`: `/admin/tenants` (crear institución, activar/desactivar y chequeo de aislamiento).
+- Rutas públicas: `/`, `/login`, `/registro`. Paciente: `/paciente`, `/cuestionario`, `/analizar`, `/resultado/:id`, `/historial`, `/diario`, `/mas`, `/autoexploracion`, `/recordatorios`, `/informacion`, `/informacion/:slug`. Pública: `/baja` (confirmar baja del correo). `platform_admin`: `/admin/tenants` (crear institución, activar/desactivar y chequeo de aislamiento).
 
 ### Brechas conocidas (resolver en este orden)
 
