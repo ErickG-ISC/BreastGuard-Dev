@@ -14,6 +14,7 @@ from backend.app.api.v1 import (
     analyses,
     audit,
     auth,
+    blog,
     health,
     images,
     internal,
@@ -27,6 +28,7 @@ from backend.app.db import assert_safe_db_role
 from backend.app.ml.loader import load_predictor
 from backend.app.ml.service import InferenceService
 from backend.app.ml.settings import get_settings
+from backend.app.services import blog as blog_service
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +37,8 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     # Falla cerrado: sin rol seguro (no superusuario, no BYPASSRLS) la app no arranca
     assert_safe_db_role()
+    # El contenido del blog se valida al arrancar (las pruebas lo validan antes, en CI)
+    blog_service.load_all()
     # El modelo se carga UNA vez aquí, nunca por petición. Si falla, la app arranca igual y
     # el análisis responde 503 (lo indica /health).
     settings = get_settings()
@@ -85,6 +89,7 @@ app.include_router(self_exams.router, prefix="/api/v1")
 app.include_router(symptoms.router, prefix="/api/v1/symptoms")
 app.include_router(reminders.router, prefix="/api/v1")
 app.include_router(internal.router, prefix="/api/v1")
+app.include_router(blog.router, prefix="/api/v1")
 
 
 @app.get("/")
