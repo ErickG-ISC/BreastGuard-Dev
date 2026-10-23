@@ -9,7 +9,16 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.app.api.v1 import admin, analyses, audit, auth, health, images, onboarding
+from backend.app.api.v1 import (
+    admin,
+    analyses,
+    audit,
+    auth,
+    health,
+    images,
+    onboarding,
+    self_exams,
+)
 from backend.app.cors import parse_origins
 from backend.app.db import assert_safe_db_role
 from backend.app.ml.loader import load_predictor
@@ -69,6 +78,7 @@ app.include_router(admin.router, prefix="/api/v1/admin")
 app.include_router(audit.router, prefix="/api/v1/audit")
 app.include_router(onboarding.router, prefix="/api/v1")
 app.include_router(analyses.router, prefix="/api/v1/analyses")
+app.include_router(self_exams.router, prefix="/api/v1")
 
 
 @app.get("/")

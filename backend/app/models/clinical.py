@@ -167,3 +167,39 @@ class Analysis(Base):
     quality_flags: Mapped[list] = mapped_column(JSONB)
     report: Mapped[dict] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SelfExam(Base):
+    """Autoexploración guiada (CU-03). Se crea al iniciar y se completa al terminar."""
+
+    __tablename__ = "self_exams"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "patient_id"],
+            ["clinical.patients.tenant_id", "clinical.patients.id"],
+            name="fk_self_exams_patient",
+        ),
+        CheckConstraint(
+            "noticed_change IN ('si', 'no', 'no_segura')", name="ck_self_exams_noticed_change"
+        ),
+        CheckConstraint("char_length(note) <= 1000", name="ck_self_exams_note_length"),
+        CheckConstraint(
+            "(finished_at IS NULL) = (noticed_change IS NULL) "
+            "AND (finished_at IS NOT NULL OR note IS NULL)",
+            name="ck_self_exams_finished",
+        ),
+        UniqueConstraint("tenant_id", "patient_id", "id", name="uq_self_exams_patient_id"),
+        Index("ix_self_exams_patient", "tenant_id", "patient_id", "started_at"),
+        {"schema": "clinical"},
+    )
+
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    id: Mapped[uuid.UUID] = _id()
+    patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    content_version: Mapped[str] = mapped_column(Text)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    noticed_change: Mapped[str | None] = mapped_column(Text)
+    # Texto libre sensible: nunca en logs ni en la auditoría
+    note: Mapped[str | None] = mapped_column(Text)

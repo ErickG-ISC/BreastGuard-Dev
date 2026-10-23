@@ -64,6 +64,8 @@ def get_engine() -> Engine:
         pool_pre_ping=True,
         pool_recycle=300,
         pool_reset_on_return="rollback",
+        # Los errores de base nunca vuelcan los parámetros: pueden traer notas libres de pacientes
+        hide_parameters=True,
     )
 
 

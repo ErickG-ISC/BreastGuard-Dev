@@ -21,7 +21,14 @@ from tests.pgtest import (
 
 APP_SCHEMAS = {"control", "clinical"}
 CONTROL_TABLES = {"tenants", "users", "consents", "plans", "subscriptions"}
-CLINICAL_TABLES = {"patients", "medical_images", "audit_log", "questionnaires", "analyses"}
+CLINICAL_TABLES = {
+    "patients",
+    "medical_images",
+    "audit_log",
+    "questionnaires",
+    "analyses",
+    "self_exams",
+}
 
 
 @pytest.fixture

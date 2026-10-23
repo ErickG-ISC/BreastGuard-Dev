@@ -5,6 +5,7 @@ import {
   HomeIcon,
   MoreIcon,
   QuestionnaireIcon,
+  SelfExamIcon,
 } from './icons';
 
 // Secciones principales: barra inferior en móvil y primera parte de la barra lateral
@@ -18,6 +19,7 @@ export const PRIMARY_NAV = [
 
 // Secciones de "Más": página propia en móvil, visibles directo en la barra lateral de escritorio
 export const SECONDARY_NAV = [
+  { label: 'Autoexploración', to: '/autoexploracion', icon: SelfExamIcon },
   { label: 'Cuestionario', to: '/cuestionario', icon: QuestionnaireIcon },
 ];
 

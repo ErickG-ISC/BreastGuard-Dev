@@ -23,6 +23,7 @@ PUBLIC_ROUTES = {
     ("POST", "/api/v1/auth/token"),
     ("GET", "/api/v1/consent/current"),
     ("GET", "/api/v1/plans"),
+    ("GET", "/api/v1/self-exam/guide"),
 }
 # Guarda contra un falso verde: si la enumeración de rutas deja de funcionar, esto falla
 MIN_EXPECTED_ROUTES = 20

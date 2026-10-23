@@ -119,6 +119,10 @@ Reglas de infraestructura:
   - `DELETE /analyses/{id}` borra primero los objetos de Storage y después las filas, con auditoría. Si Storage falla responde 502 y no borra nada.
   - Si el análisis es ajeno o no existe, la respuesta es la misma (404) y se registra `analysis.denied`.
   - Tabla `clinical.analyses` (0008): RLS forzado, política de paciente y FKs compuestas a `patients` y `medical_images`; solo SELECT, INSERT y DELETE.
+- `api/v1/self_exams.py` + `services/self_exams.py` (CU-03, solo pacientes salvo la guía):
+  - `GET /self-exam/guide` (público): guía versionada en `content/self_exam_v1.json` (BORRADOR, 6 pasos, sin temporizador).
+  - `POST /self-exams` (iniciar), `POST /self-exams/{id}/finish` (`noticed_change`: `si|no|no_segura` y nota opcional; terminar dos veces da 409), `GET /self-exams` (paginado), `GET /self-exams/latest` (última terminada), `GET` y `DELETE /self-exams/{id}`.
+  - Tabla `clinical.self_exams` (0009): RLS forzado, política de paciente, `UNIQUE (tenant_id, patient_id, id)` como destino de la FK del diario. La nota es sensible: nunca en logs ni en la auditoría (`self_exam.start|finish|read|list|delete|denied`).
 - `api/v1/images.py`: `POST /upload` (paciente), `GET /images` y `GET /images/{id}` (con URL firmada; ajena o inexistente da el mismo 404). Lecturas, subidas y accesos denegados (`image.denied`) auditados.
 - `api/v1/audit.py`: `GET /audit` para `tenant_admin` con filtros `from`, `to`, `actor_id`, `limit` y `offset`.
 - `api/rate_limit.py`: límites por IP y ruta: `/auth/token` 10/min, `/auth/register` 5/min, `/images/upload` 20/min. La IP sale de `api/client_ip.py`: ignora `X-Forwarded-For` salvo con `TRUSTED_PROXY_HOPS` (en Render, `1`; ver ADR 0004).
@@ -137,7 +141,7 @@ SPA estándar: `main.jsx` monta `App.jsx` (tema, `AuthProvider` y rutas con `rea
 - `api/client.js`: axios con el Bearer del JWT, guardado en `sessionStorage`; un 401 cierra la sesión.
 - `auth/AuthContext.jsx`: login (`/auth/token`) y el usuario actual (`/auth/me`).
 - `components/ProtectedRoute.jsx` (por rol) y `components/Layout.jsx`, con el aviso de herramienta de apoyo.
-- Rutas públicas: `/`, `/login`, `/registro`. Paciente: `/paciente`, `/cuestionario`, `/analizar`, `/resultado/:id`, `/historial`, `/diario`, `/mas`. `platform_admin`: `/admin/tenants` (crear institución, activar/desactivar y chequeo de aislamiento).
+- Rutas públicas: `/`, `/login`, `/registro`. Paciente: `/paciente`, `/cuestionario`, `/analizar`, `/resultado/:id`, `/historial`, `/diario`, `/mas`, `/autoexploracion`. `platform_admin`: `/admin/tenants` (crear institución, activar/desactivar y chequeo de aislamiento).
 
 ### Brechas conocidas (resolver en este orden)
 

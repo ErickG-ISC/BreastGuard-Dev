@@ -13,6 +13,7 @@ import Result from './pages/patient/Result';
 import History from './pages/patient/History';
 import Diary from './pages/patient/Diary';
 import More from './pages/patient/More';
+import SelfExam from './pages/patient/SelfExam';
 import Tenants from './pages/admin/Tenants';
 import theme from './theme';
 
@@ -49,6 +50,7 @@ function App() {
               <Route path="/historial" element={<History />} />
               <Route path="/diario" element={<Diary />} />
               <Route path="/mas" element={<More />} />
+              <Route path="/autoexploracion" element={<SelfExam />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
