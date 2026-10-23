@@ -3,6 +3,7 @@ import {
   DiaryIcon,
   HistoryIcon,
   HomeIcon,
+  InfoIcon,
   MoreIcon,
   QuestionnaireIcon,
   ReminderIcon,
@@ -22,6 +23,7 @@ export const PRIMARY_NAV = [
 export const SECONDARY_NAV = [
   { label: 'Autoexploración', to: '/autoexploracion', icon: SelfExamIcon },
   { label: 'Recordatorios', to: '/recordatorios', icon: ReminderIcon },
+  { label: 'Información', to: '/informacion', icon: InfoIcon },
   { label: 'Cuestionario', to: '/cuestionario', icon: QuestionnaireIcon },
 ];
 
