@@ -49,8 +49,14 @@ def _own(auth: AuthContext):
     return SelfExam.patient_id == own_patient
 
 
-def _load(db: Session, auth: AuthContext, exam_id: uuid.UUID, ip: str | None) -> SelfExam:
-    exam = db.scalars(select(SelfExam).where(SelfExam.id == exam_id, _own(auth))).first()
+def _load(
+    db: Session, auth: AuthContext, exam_id: uuid.UUID, ip: str | None, *, lock: bool = False
+) -> SelfExam:
+    query = select(SelfExam).where(SelfExam.id == exam_id, _own(auth))
+    if lock:
+        # Dos "terminar" simultáneos: el segundo espera al primero y luego ve finished_at
+        query = query.with_for_update(of=SelfExam)
+    exam = db.scalars(query).first()
     if exam is None:
         _deny(db, auth, exam_id, ip)
     return exam
@@ -74,7 +80,7 @@ def start(db: Session, auth: AuthContext, ip: str | None) -> SelfExam:
 def finish(
     db: Session, auth: AuthContext, exam_id: uuid.UUID, data: SelfExamFinishIn, ip: str | None
 ) -> SelfExam:
-    exam = _load(db, auth, exam_id, ip)
+    exam = _load(db, auth, exam_id, ip, lock=True)
     if exam.finished_at is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Esta autoexploración ya se terminó"

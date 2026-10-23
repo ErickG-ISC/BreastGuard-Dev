@@ -37,6 +37,9 @@ class SelfExamFinishIn(BaseModel):
     def blank_note_is_none(cls, value: str | None) -> str | None:
         if value is None:
             return None
+        # Postgres no admite el carácter nulo en texto: 422 en lugar de un 500
+        if "\x00" in value:
+            raise ValueError("La nota contiene caracteres no válidos")
         value = value.strip()
         return value or None
 
