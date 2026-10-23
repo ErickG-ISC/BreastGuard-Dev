@@ -123,6 +123,10 @@ Reglas de infraestructura:
   - `GET /self-exam/guide` (público): guía versionada en `content/self_exam_v1.json` (BORRADOR, 6 pasos, sin temporizador).
   - `POST /self-exams` (iniciar), `POST /self-exams/{id}/finish` (`noticed_change`: `si|no|no_segura` y nota opcional; terminar dos veces da 409), `GET /self-exams` (paginado), `GET /self-exams/latest` (última terminada), `GET` y `DELETE /self-exams/{id}`.
   - Tabla `clinical.self_exams` (0009): RLS forzado, política de paciente, `UNIQUE (tenant_id, patient_id, id)` como destino de la FK del diario. La nota es sensible: nunca en logs ni en la auditoría (`self_exam.start|finish|read|list|delete|denied`).
+- `api/v1/symptoms.py` + `services/symptoms.py` (CU-04, solo pacientes): `POST /symptoms`, `GET /symptoms` (filtros `from`, `to`, `symptom`, `zone`, `side`; paginado), `GET`, `PATCH` (parcial) y `DELETE /symptoms/{id}` (borrado real).
+  - Tabla `clinical.symptom_entries` (0010): códigos fijos de lado, zona y síntomas (CHECK), intensidad 0–10, nota (máx. 2000), ciclo opcional. FK `(tenant_id, patient_id, self_exam_id) → self_exams` con `ON DELETE SET NULL (self_exam_id)`: la base impide enlazar la autoexploración de otra paciente aunque sea del mismo tenant (las FKs no pasan por RLS). `tenant_fk` acepta `ondelete`.
+  - `get_entries(db, auth, since)` es la función reutilizable para el paquete de CU-07; no audita (audita quien la llama).
+  - Auditoría `symptom.create|read|list|update|delete|denied`, sin contenido de la nota. El engine usa `hide_parameters=True` para que ningún error vuelque notas en logs.
 - `api/v1/images.py`: `POST /upload` (paciente), `GET /images` y `GET /images/{id}` (con URL firmada; ajena o inexistente da el mismo 404). Lecturas, subidas y accesos denegados (`image.denied`) auditados.
 - `api/v1/audit.py`: `GET /audit` para `tenant_admin` con filtros `from`, `to`, `actor_id`, `limit` y `offset`.
 - `api/rate_limit.py`: límites por IP y ruta: `/auth/token` 10/min, `/auth/register` 5/min, `/images/upload` 20/min. La IP sale de `api/client_ip.py`: ignora `X-Forwarded-For` salvo con `TRUSTED_PROXY_HOPS` (en Render, `1`; ver ADR 0004).
