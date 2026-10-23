@@ -16,4 +16,5 @@ python-dotenv==1.2.4
 ai-edge-litert==2.3.0
 numpy==2.5.4
 pillow==13.0.0
+# Base de zonas horarias IANA para zoneinfo (Windows y python:slim no la traen; CU-05)
 tzdata==2026.5
