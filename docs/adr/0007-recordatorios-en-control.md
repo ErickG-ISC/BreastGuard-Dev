@@ -47,7 +47,11 @@ regla "ninguna sesión sin contexto toca datos clínicos".
 
 - El aviso dentro de la app no depende del correo: la demo funciona aunque no haya proveedor.
 - Si el despachador estuvo dormido, se genera **un** aviso y el siguiente se calcula desde
-  ahora, sin ráfagas de avisos atrasados. El correo es "a lo sumo una vez".
+  ahora, sin ráfagas de avisos atrasados.
+- Si el proceso muere entre el reclamo y el envío, el aviso queda en `pending`; un despacho
+  posterior lo reintenta pasados 10 minutos (si la paciente sigue queriendo correo). Dos
+  despachos muy seguidos podrían reintentar el mismo correo huérfano: es raro (el workflow
+  tiene `concurrency` y corre cada 15 min) y solo duplicaría un correo, nunca un aviso.
 - Las pruebas (`tests/api/test_dispatcher.py`) registran todo el SQL del despacho y fallan si
   aparece `clinical.` o si la sesión tiene `app.tenant_id`.
 - Un olvido del filtro de pertenencia en `control` filtraría configuración ajena. Lo mitigan la

@@ -10,7 +10,7 @@ import logging
 import os
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException, status
 from sqlalchemy import select, update
@@ -27,6 +27,8 @@ from backend.app.services.unsubscribe import InvalidUnsubscribeToken, make_token
 logger = logging.getLogger(__name__)
 
 BATCH_SIZE = 200
+# Un correo 'pending' más viejo que esto quedó huérfano (el proceso murió antes de enviarlo)
+STALE_AFTER = timedelta(minutes=10)
 
 
 def _own_reminders(auth: AuthContext):
@@ -59,19 +61,16 @@ def upsert(db: Session, auth: AuthContext, kind: str, data: ReminderIn) -> Remin
         after=now,
     )
     values = data.model_dump() | {"anchor_date": anchor, "next_run_at": upcoming}
-    reminder = db.scalars(
-        select(Reminder).where(_own_reminders(auth), Reminder.kind == kind).with_for_update()
-    ).first()
-    if reminder is None:
-        reminder = Reminder(tenant_id=auth.tenant_id, user_id=auth.user_id, kind=kind, **values)
-        db.add(reminder)
-    else:
-        for name, value in values.items():
-            setattr(reminder, name, value)
-        reminder.updated_at = now
+    # Un solo INSERT ... ON CONFLICT: dos guardados simultáneos no chocan con el UNIQUE
+    db.execute(
+        insert(Reminder)
+        .values(tenant_id=auth.tenant_id, user_id=auth.user_id, kind=kind, **values)
+        .on_conflict_do_update(
+            constraint="uq_reminders_user_kind", set_=values | {"updated_at": now}
+        )
+    )
     db.commit()
-    db.refresh(reminder)
-    return reminder
+    return db.scalars(select(Reminder).where(_own_reminders(auth), Reminder.kind == kind)).one()
 
 
 def delete(db: Session, auth: AuthContext, kind: str) -> None:
@@ -153,6 +152,41 @@ def _unsubscribe_url(reminder_id: uuid.UUID, user_id: uuid.UUID) -> str:
     return f"{base}/baja?token={make_token(reminder_id, user_id)}"
 
 
+def _stale_pending(db: Session, now: datetime) -> list[_Outgoing]:
+    """Correos que quedaron en 'pending' porque el proceso murió entre el reclamo y el envío.
+
+    Se reintentan una vez en un despacho posterior (pasados STALE_AFTER) y terminan en 'sent' o
+    'failed'. Solo si el recordatorio todavía pide correo (la paciente pudo darse de baja).
+    """
+    rows = db.execute(
+        select(ReminderNotice, Reminder, User.email)
+        .join(Reminder, Reminder.id == ReminderNotice.reminder_id)
+        .join(User, (User.id == Reminder.user_id) & (User.tenant_id == Reminder.tenant_id))
+        .join(Tenant, Tenant.id == Reminder.tenant_id)
+        .where(
+            ReminderNotice.email_status == "pending",
+            ReminderNotice.created_at < now - STALE_AFTER,
+            Reminder.channels.contains(["email"]),
+            User.is_active.is_(True),
+            Tenant.is_active.is_(True),
+        )
+        .order_by(ReminderNotice.created_at)
+        .limit(BATCH_SIZE)
+        .with_for_update(of=ReminderNotice, skip_locked=True)
+    ).all()
+    return [
+        _Outgoing(
+            notice_id=notice.id,
+            reminder_id=reminder.id,
+            user_id=reminder.user_id,
+            email=address,
+            kind=notice.kind,
+            discreet=reminder.discreet,
+        )
+        for notice, reminder, address in rows
+    ]
+
+
 def _claim(db: Session, now: datetime) -> tuple[int, list[_Outgoing]]:
     """Reclama los vencidos, crea sus avisos y reprograma, en UNA transacción.
 
@@ -212,6 +246,7 @@ def _claim(db: Session, now: datetime) -> tuple[int, list[_Outgoing]]:
                     discreet=reminder.discreet,
                 )
             )
+    outgoing.extend(_stale_pending(db, now))
     db.commit()
     return len(rows), outgoing
 

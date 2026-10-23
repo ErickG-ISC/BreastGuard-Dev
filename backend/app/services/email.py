@@ -59,10 +59,13 @@ def mask(email: str) -> str:
 
 
 class ConsoleEmailSender:
-    """Desarrollo y demo: no envía nada, solo deja constancia en el log (sin el cuerpo)."""
+    """Desarrollo y demo: no envía nada, solo deja constancia en el log.
+
+    Ni el cuerpo ni el asunto: fuera del modo discreto el asunto revela el tema.
+    """
 
     def send(self, message: EmailMessage) -> None:
-        logger.info("Correo (consola) para %s: %s", mask(message.to), message.subject)
+        logger.info("Correo (consola) para %s", mask(message.to))
 
 
 def get_sender() -> EmailSender:
