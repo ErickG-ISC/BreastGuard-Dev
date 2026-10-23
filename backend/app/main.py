@@ -18,6 +18,7 @@ from backend.app.api.v1 import (
     images,
     onboarding,
     self_exams,
+    symptoms,
 )
 from backend.app.cors import parse_origins
 from backend.app.db import assert_safe_db_role
@@ -79,6 +80,7 @@ app.include_router(audit.router, prefix="/api/v1/audit")
 app.include_router(onboarding.router, prefix="/api/v1")
 app.include_router(analyses.router, prefix="/api/v1/analyses")
 app.include_router(self_exams.router, prefix="/api/v1")
+app.include_router(symptoms.router, prefix="/api/v1/symptoms")
 
 
 @app.get("/")
