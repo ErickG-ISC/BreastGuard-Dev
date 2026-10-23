@@ -70,6 +70,17 @@ PROTECTED = {
     "analyses_list": ("GET", f"{API}/analyses", {}),
     "analyses_detail": ("GET", f"{API}/analyses/{SOME_ID}", {}),
     "analyses_delete": ("DELETE", f"{API}/analyses/{SOME_ID}", {}),
+    # CU-03 (solo pacientes)
+    "self_exams_start": ("POST", f"{API}/self-exams", {}),
+    "self_exams_finish": (
+        "POST",
+        f"{API}/self-exams/{SOME_ID}/finish",
+        {"json": {"noticed_change": "no"}},
+    ),
+    "self_exams_list": ("GET", f"{API}/self-exams", {}),
+    "self_exams_latest": ("GET", f"{API}/self-exams/latest", {}),
+    "self_exams_detail": ("GET", f"{API}/self-exams/{SOME_ID}", {}),
+    "self_exams_delete": ("DELETE", f"{API}/self-exams/{SOME_ID}", {}),
 }
 PATIENT_ONLY_ENDPOINTS = [
     "subscription_get",
@@ -81,6 +92,12 @@ PATIENT_ONLY_ENDPOINTS = [
     "analyses_list",
     "analyses_detail",
     "analyses_delete",
+    "self_exams_start",
+    "self_exams_finish",
+    "self_exams_list",
+    "self_exams_latest",
+    "self_exams_detail",
+    "self_exams_delete",
 ]
 ADMIN_ENDPOINTS = [name for name in PROTECTED if name.startswith("admin_")]
 

@@ -7,6 +7,7 @@ from sqlalchemy import text
 
 from backend.app.services import audit
 from tests.helpers import DEFAULT_PASSWORD, auth_headers
+from tests.isolation.test_rls_por_tabla import MODEL_TABLES
 
 NEW_TENANT = {
     "name": "Clínica Norte",
@@ -183,13 +184,8 @@ class TestChequeoDeAislamiento:
         assert report["tenant_has_witness_rows"] is True
         assert report["conclusive"] is True
         assert report["other_tenants_checked"] >= 1
-        assert set(report["tables_checked"]) == {
-            "patients",
-            "medical_images",
-            "audit_log",
-            "questionnaires",
-            "analyses",
-        }
+        # Todas las tablas clínicas de los modelos (el chequeo las descubre del catálogo)
+        assert set(report["tables_checked"]) == set(MODEL_TABLES)
 
     def test_no_deja_rastro(self, client, root, owner_engine):
         tenant_id = create(client, root).json()["tenant"]["id"]
