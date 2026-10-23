@@ -87,7 +87,7 @@ def purge_tenant(
                 )
                 summary.deleted[f"clinical.{table}"] = result.rowcount
             # Datos de cuenta ligados a los usuarios del tenant, antes de borrar los usuarios
-            for table in ("consents", "subscriptions"):
+            for table in ("reminder_notices", "reminders", "consents", "subscriptions"):
                 result = conn.execute(
                     text(
                         f"DELETE FROM control.{table} WHERE user_id IN "

@@ -16,7 +16,9 @@ from backend.app.api.v1 import (
     auth,
     health,
     images,
+    internal,
     onboarding,
+    reminders,
     self_exams,
     symptoms,
 )
@@ -81,6 +83,8 @@ app.include_router(onboarding.router, prefix="/api/v1")
 app.include_router(analyses.router, prefix="/api/v1/analyses")
 app.include_router(self_exams.router, prefix="/api/v1")
 app.include_router(symptoms.router, prefix="/api/v1/symptoms")
+app.include_router(reminders.router, prefix="/api/v1")
+app.include_router(internal.router, prefix="/api/v1")
 
 
 @app.get("/")
