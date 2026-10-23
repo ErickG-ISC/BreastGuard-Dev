@@ -87,7 +87,13 @@ def parse(text: str, name: str) -> Article:
     if not isinstance(sources, list) or any(not s.startswith("https://") for s in sources):
         raise BlogContentError(f"{name}: las fuentes deben ser URLs https")
     reviewed_by = meta.get("revisado_por") or None
-    review_date = date.fromisoformat(meta["fecha_revision"]) if meta.get("fecha_revision") else None
+    try:
+        review_date = (
+            date.fromisoformat(meta["fecha_revision"]) if meta.get("fecha_revision") else None
+        )
+        reading_minutes = int(meta["lectura_min"])
+    except ValueError:
+        raise BlogContentError(f"{name}: fecha_revision o lectura_min no válidos") from None
     if meta["estado"] == "revisado" and not (reviewed_by and review_date):
         raise BlogContentError(f"{name}: 'revisado' exige revisado_por y fecha_revision")
 
@@ -99,7 +105,7 @@ def parse(text: str, name: str) -> Article:
         reviewed_by=reviewed_by,
         review_date=review_date,
         status=meta["estado"],
-        reading_minutes=int(meta["lectura_min"]),
+        reading_minutes=reading_minutes,
         sources=tuple(sources),
         body=match.group(2).strip(),
     )

@@ -59,7 +59,9 @@ def test_articulo_y_faq(client):
     assert faq.status_code == 200 and "¿El análisis reemplaza a mi médico?" in faq.json()["body"]
 
 
-@pytest.mark.parametrize("slug", ["no-existe", "..%2F..%2Fconsent_v1", "FAQ"])
+@pytest.mark.parametrize(
+    "slug", ["no-existe", "..%2F..%2Fconsent_v1", "..%2f..%2fmain", "FAQ", "faq.md", "bi-rads-3.md"]
+)
 def test_slug_desconocido_404(client, slug):
     assert client.get(f"{API}/blog/{slug}").status_code == 404
 
