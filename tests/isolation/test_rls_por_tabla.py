@@ -188,6 +188,56 @@ def _insert_self_exam(conn, tenant_id, actor, parents, overrides):
     return values["id"]
 
 
+def _self_exam_parent(conn, tenant_id, actor):
+    parents = _patient_parent(conn, tenant_id, actor)
+    parents["self_exam_id"] = _insert_self_exam(conn, tenant_id, actor, parents, {})
+    return parents
+
+
+def _insert_symptom_entry(conn, tenant_id, actor, parents, overrides):
+    values = {
+        "id": uuid.uuid4(),
+        "patient_id": parents["patient_id"],
+        "self_exam_id": parents["self_exam_id"],
+        "created_by": actor.id,
+        **overrides,
+    }
+    columns = [
+        "id",
+        "patient_id",
+        "self_exam_id",
+        "created_by",
+        "entry_date",
+        "side",
+        "zone",
+        "symptoms",
+        "intensity",
+    ]
+    binds = [
+        ":id",
+        ":patient_id",
+        ":self_exam_id",
+        ":created_by",
+        "current_date",
+        "'izquierdo'",
+        "'axila'",
+        "ARRAY['dolor']",
+        "3",
+    ]
+    if tenant_id is not None:
+        columns.append("tenant_id")
+        binds.append(":tenant_id")
+        values["tenant_id"] = tenant_id
+    conn.execute(
+        text(
+            f"INSERT INTO clinical.symptom_entries ({', '.join(columns)}) "
+            f"VALUES ({', '.join(binds)})"
+        ),
+        values,
+    )
+    return values["id"]
+
+
 def _image_parent(conn, tenant_id, actor):
     parents = _patient_parent(conn, tenant_id, actor)
     parents["image_id"] = _insert_image(conn, tenant_id, actor, parents, {})
@@ -249,6 +299,21 @@ RECIPES: dict[str, Recipe] = {
             "fk_self_exams_patient": lambda seed_b, world: {
                 "patient_id": seed_b.parents["patient_id"]
             }
+        },
+    ),
+    "symptom_entries": Recipe(
+        parents=_self_exam_parent,
+        insert=_insert_symptom_entry,
+        update_column="intensity",
+        update_value="9",
+        cross_fk={
+            "fk_symptom_entries_patient": lambda seed_b, world: {
+                "patient_id": seed_b.parents["patient_id"],
+                "self_exam_id": None,
+            },
+            "fk_symptom_entries_self_exam": lambda seed_b, world: {
+                "self_exam_id": seed_b.parents["self_exam_id"]
+            },
         },
     ),
     "audit_log": Recipe(
