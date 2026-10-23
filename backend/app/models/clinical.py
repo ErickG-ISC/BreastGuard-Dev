@@ -4,20 +4,23 @@
 """
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     Float,
     ForeignKeyConstraint,
     Index,
+    SmallInteger,
     Text,
     UniqueConstraint,
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, INET, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.app.models.base import Base
@@ -203,3 +206,62 @@ class SelfExam(Base):
     noticed_change: Mapped[str | None] = mapped_column(Text)
     # Texto libre sensible: nunca en logs ni en la auditoría
     note: Mapped[str | None] = mapped_column(Text)
+
+
+class SymptomEntry(Base):
+    """Entrada del diario de síntomas con zona del mapa corporal (CU-04)."""
+
+    __tablename__ = "symptom_entries"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "patient_id"],
+            ["clinical.patients.tenant_id", "clinical.patients.id"],
+            name="fk_symptom_entries_patient",
+        ),
+        # Con patient_id: solo enlaza autoexploraciones de la misma paciente
+        ForeignKeyConstraint(
+            ["tenant_id", "patient_id", "self_exam_id"],
+            [
+                "clinical.self_exams.tenant_id",
+                "clinical.self_exams.patient_id",
+                "clinical.self_exams.id",
+            ],
+            name="fk_symptom_entries_self_exam",
+            ondelete="SET NULL (self_exam_id)",
+        ),
+        CheckConstraint(
+            "side IN ('izquierdo', 'derecho', 'ambos')", name="ck_symptom_entries_side"
+        ),
+        CheckConstraint(
+            "zone IN ('superior_externo', 'superior_interno', 'inferior_externo', "
+            "'inferior_interno', 'areola_pezon', 'axila', 'otra')",
+            name="ck_symptom_entries_zone",
+        ),
+        CheckConstraint(
+            "cardinality(symptoms) >= 1 AND symptoms <@ ARRAY['bulto', 'dolor', 'sensibilidad', "
+            "'secrecion', 'cambio_piel', 'cambio_pezon', 'enrojecimiento', 'otro']::text[]",
+            name="ck_symptom_entries_symptoms",
+        ),
+        CheckConstraint("intensity BETWEEN 0 AND 10", name="ck_symptom_entries_intensity"),
+        CheckConstraint("char_length(note) <= 2000", name="ck_symptom_entries_note_length"),
+        CheckConstraint("cycle_day BETWEEN 1 AND 60", name="ck_symptom_entries_cycle_day"),
+        Index("ix_symptom_entries_patient", "tenant_id", "patient_id", "entry_date"),
+        {"schema": "clinical"},
+    )
+
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    id: Mapped[uuid.UUID] = _id()
+    patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    entry_date: Mapped[date] = mapped_column(Date)
+    side: Mapped[str] = mapped_column(Text)
+    zone: Mapped[str] = mapped_column(Text)
+    symptoms: Mapped[list[str]] = mapped_column(ARRAY(Text))
+    intensity: Mapped[int] = mapped_column(SmallInteger)
+    # Texto libre sensible: nunca en logs ni en la auditoría
+    note: Mapped[str | None] = mapped_column(Text)
+    self_exam_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    cycle_day: Mapped[int | None] = mapped_column(SmallInteger)
+    in_period: Mapped[bool | None] = mapped_column(Boolean)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -23,6 +23,7 @@ CLINICAL_DELETE_ORDER = (
     "audit_log",
     "questionnaires",
     "analyses",
+    "symptom_entries",
     "self_exams",
     "medical_images",
     "patients",

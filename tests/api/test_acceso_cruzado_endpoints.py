@@ -81,6 +81,24 @@ PROTECTED = {
     "self_exams_latest": ("GET", f"{API}/self-exams/latest", {}),
     "self_exams_detail": ("GET", f"{API}/self-exams/{SOME_ID}", {}),
     "self_exams_delete": ("DELETE", f"{API}/self-exams/{SOME_ID}", {}),
+    # CU-04 (solo pacientes)
+    "symptoms_create": (
+        "POST",
+        f"{API}/symptoms",
+        {
+            "json": {
+                "entry_date": "2026-01-10",
+                "side": "izquierdo",
+                "zone": "axila",
+                "symptoms": ["dolor"],
+                "intensity": 3,
+            }
+        },
+    ),
+    "symptoms_list": ("GET", f"{API}/symptoms", {}),
+    "symptoms_detail": ("GET", f"{API}/symptoms/{SOME_ID}", {}),
+    "symptoms_update": ("PATCH", f"{API}/symptoms/{SOME_ID}", {"json": {"intensity": 2}}),
+    "symptoms_delete": ("DELETE", f"{API}/symptoms/{SOME_ID}", {}),
 }
 PATIENT_ONLY_ENDPOINTS = [
     "subscription_get",
@@ -98,6 +116,11 @@ PATIENT_ONLY_ENDPOINTS = [
     "self_exams_latest",
     "self_exams_detail",
     "self_exams_delete",
+    "symptoms_create",
+    "symptoms_list",
+    "symptoms_detail",
+    "symptoms_update",
+    "symptoms_delete",
 ]
 ADMIN_ENDPOINTS = [name for name in PROTECTED if name.startswith("admin_")]
 

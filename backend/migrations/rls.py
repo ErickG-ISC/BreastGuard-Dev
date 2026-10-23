@@ -122,8 +122,13 @@ def tenant_fk(
     ref_columns: list[str],
     *,
     ref_schema: str = CLINICAL,
+    ondelete: str | None = None,
 ) -> None:
-    """FK compuesta que siempre empieza por `tenant_id`: impide referenciar filas de otro tenant."""
+    """FK compuesta que siempre empieza por `tenant_id`: impide referenciar filas de otro tenant.
+
+    `ondelete` acepta la forma de Postgres 15+ con lista de columnas, p. ej.
+    `"SET NULL (self_exam_id)"`: así un borrado nunca anula `tenant_id` ni `patient_id`.
+    """
     if columns[0] != "tenant_id" or ref_columns[0] != "tenant_id":
         raise ValueError(
             "Las FKs entre datos de tenants deben ser compuestas y empezar por tenant_id"
@@ -136,6 +141,7 @@ def tenant_fk(
         ref_columns,
         source_schema=CLINICAL,
         referent_schema=ref_schema,
+        ondelete=ondelete,
     )
 
 

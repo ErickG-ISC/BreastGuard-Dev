@@ -28,6 +28,7 @@ CLINICAL_TABLES = {
     "questionnaires",
     "analyses",
     "self_exams",
+    "symptom_entries",
 }
 
 
