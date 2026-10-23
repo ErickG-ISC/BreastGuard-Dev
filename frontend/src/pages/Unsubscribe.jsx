@@ -1,5 +1,5 @@
 import { Alert, Button, Paper, Stack, Typography } from '@mui/material';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api, errorMessage } from '../api/client';
 import Layout from '../components/Layout';
@@ -8,7 +8,11 @@ import Layout from '../components/Layout';
 // botón: abrir el enlace no basta, así los escáneres de correo no dan de baja a nadie.
 export default function Unsubscribe() {
   const [params] = useSearchParams();
-  const token = params.get('token');
+  // El token se guarda en memoria y se quita de la barra de direcciones (historial, capturas)
+  const [token] = useState(() => params.get('token'));
+  useEffect(() => {
+    if (window.location.search) window.history.replaceState(null, '', window.location.pathname);
+  }, []);
   const [state, setState] = useState('idle');
   const [error, setError] = useState('');
 
