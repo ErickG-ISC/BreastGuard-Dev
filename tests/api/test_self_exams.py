@@ -1,11 +1,13 @@
 """CU-03: autoexploración guiada (guía pública, iniciar, terminar, historial y acceso cruzado)."""
 
+import threading
 import uuid
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 
-from tests.helpers import auth_headers
+from tests.helpers import auth_headers, tenant_session
 
 API = "/api/v1"
 SECRET_NOTE = "nota-secreta-de-la-paciente"
@@ -212,3 +214,82 @@ class TestAccesoCruzado:
     def test_el_personal_no_usa_endpoints_de_paciente(self, client, world, user_factory, role):
         staff = user_factory(world["ta"], role=role)
         assert client.post(f"{API}/self-exams", headers=auth_headers(staff)).status_code == 403
+
+
+class TestEndurecimiento:
+    def test_nota_con_caracter_nulo_422(self, client, world):
+        exam = start(client, world["a1"])
+        response = finish(client, world["a1"], exam["id"], note="a\u0000b")
+        assert response.status_code == 422
+
+    def test_dos_terminar_simultaneos_solo_uno_gana(self, client, world, owner_engine):
+        exam = start(client, world["a1"])
+        results = []
+
+        def go(answer):
+            results.append(finish(client, world["a1"], exam["id"], noticed_change=answer))
+
+        threads = [threading.Thread(target=go, args=(a,)) for a in ("si", "no")]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert sorted(r.status_code for r in results) == [200, 409]
+        winner = next(r for r in results if r.status_code == 200).json()["noticed_change"]
+        with owner_engine.connect() as conn:
+            stored = conn.execute(
+                text("SELECT noticed_change FROM clinical.self_exams WHERE id = :id"),
+                {"id": exam["id"]},
+            ).scalar_one()
+        assert stored == winner
+
+    @pytest.mark.parametrize("victim", ["a2", "b1"])
+    def test_terminar_y_borrar_ajenos_se_auditan(self, client, world, owner_engine, victim):
+        exam = start(client, world[victim])
+        finish(client, world["a1"], exam["id"])
+        client.delete(f"{API}/self-exams/{exam['id']}", headers=auth_headers(world["a1"]))
+        denied = [
+            r for r in audit_actions(owner_engine, world["ta"].id) if r[0] == "self_exam.denied"
+        ]
+        assert denied == [("self_exam.denied", uuid.UUID(exam["id"]))] * 2
+
+    @pytest.mark.parametrize(
+        ("column", "value"),
+        [("patient_id", "gen_random_uuid()"), ("started_at", "now()"), ("created_by", "NULL")],
+    )
+    def test_app_user_no_puede_actualizar_columnas_fijas(self, client, world, column, value):
+        exam = start(client, world["a1"])
+        with tenant_session(world["a1"]) as session, pytest.raises(DBAPIError, match="permission"):
+            session.execute(
+                text(f"UPDATE clinical.self_exams SET {column} = {value} WHERE id = :id"),
+                {"id": exam["id"]},
+            )
+
+    def test_terminada_sin_respuesta_viola_el_check(self, client, world):
+        exam = start(client, world["a1"])
+        with tenant_session(world["a1"]) as session, pytest.raises(DBAPIError, match="check"):
+            session.execute(
+                text("UPDATE clinical.self_exams SET finished_at = now() WHERE id = :id"),
+                {"id": exam["id"]},
+            )
+
+    def test_no_puede_crear_filas_con_la_ficha_de_otra_paciente(self, world):
+        """Mismo tenant: la política de paciente rechaza un patient_id ajeno (WITH CHECK)."""
+        a1, a2 = world["a1"], world["a2"]
+        with tenant_session(a1) as session, pytest.raises(DBAPIError, match="row-level"):
+            session.execute(
+                text(
+                    "INSERT INTO clinical.self_exams (patient_id, created_by, content_version) "
+                    "VALUES (:p, :u, 'v1')"
+                ),
+                {"p": a2.patient_id, "u": a1.id},
+            )
+
+    @pytest.mark.parametrize("role", ["doctor", "tenant_admin"])
+    def test_el_personal_ve_solo_su_tenant(self, client, world, user_factory, role):
+        mine = start(client, world["a1"])
+        start(client, world["b1"])
+        staff = user_factory(world["ta"], role=role)
+        with tenant_session(staff) as session:
+            ids = {str(i) for i in session.scalars(text("SELECT id FROM clinical.self_exams"))}
+        assert ids == {mine["id"]}
