@@ -1,0 +1,92 @@
+{
+  "version": "v1",
+  "status": "borrador",
+  "status_note": "BORRADOR académico: pendiente de revisión por personal de salud.",
+  "title": "Autoexploración guiada",
+  "intro": "La autoexploración sirve para conocer cómo se ven y se sienten normalmente tus mamas, así podrás notar si algo cambia. Hazla con calma, de preferencia unos días después de tu periodo, cuando las mamas suelen estar menos sensibles. No sustituye las revisiones médicas ni los estudios que te indique tu médico.",
+  "steps": [
+    {
+      "id": "espejo_brazos_abajo",
+      "title": "Frente al espejo, brazos abajo",
+      "illustration": "mirror_arms_down",
+      "instructions": [
+        "Párate frente a un espejo con el torso descubierto y los brazos relajados a los lados.",
+        "Observa ambas mamas de frente y de cada lado."
+      ],
+      "look_for": [
+        "Cambios en el tamaño o la forma respecto a como las conoces.",
+        "Hundimientos, arrugas o piel con aspecto de cáscara de naranja.",
+        "Cambios en el pezón, como que se haya metido hacia adentro."
+      ]
+    },
+    {
+      "id": "espejo_brazos_arriba",
+      "title": "Frente al espejo, brazos arriba",
+      "illustration": "mirror_arms_up",
+      "instructions": [
+        "Levanta ambos brazos por encima de la cabeza.",
+        "Vuelve a observar de frente y de cada lado."
+      ],
+      "look_for": [
+        "Zonas que se hunden o se retraen al levantar los brazos.",
+        "Diferencias nuevas entre una mama y la otra."
+      ]
+    },
+    {
+      "id": "espejo_manos_cadera",
+      "title": "Frente al espejo, manos en la cadera",
+      "illustration": "mirror_hands_hips",
+      "instructions": [
+        "Coloca las manos en la cadera y presiona con firmeza para tensar el pecho.",
+        "Observa otra vez ambas mamas."
+      ],
+      "look_for": [
+        "Hundimientos o cambios en el contorno que se notan al tensar.",
+        "Enrojecimiento o cambios de color en la piel."
+      ]
+    },
+    {
+      "id": "acostada_izquierda",
+      "title": "Acostada: mama izquierda",
+      "illustration": "lying_left",
+      "instructions": [
+        "Acuéstate boca arriba con una almohada bajo el hombro izquierdo y el brazo izquierdo detrás de la cabeza.",
+        "Con las yemas de los tres dedos medios de la mano derecha, recorre toda la mama con movimientos circulares pequeños, de afuera hacia el pezón.",
+        "Usa presión suave, media y firme en cada zona."
+      ],
+      "look_for": [
+        "Bultos, zonas más duras o engrosadas que no notabas antes.",
+        "Dolor que aparece en un solo punto y no se va."
+      ]
+    },
+    {
+      "id": "acostada_derecha",
+      "title": "Acostada: mama derecha",
+      "illustration": "lying_right",
+      "instructions": [
+        "Cambia de lado: almohada bajo el hombro derecho y el brazo derecho detrás de la cabeza.",
+        "Con la mano izquierda, recorre toda la mama derecha de la misma forma."
+      ],
+      "look_for": [
+        "Bultos, zonas más duras o engrosadas que no notabas antes.",
+        "Cambios de textura respecto a la otra mama o a la vez pasada."
+      ]
+    },
+    {
+      "id": "axilas_pezon",
+      "title": "Axilas y pezones",
+      "illustration": "armpit_nipple",
+      "instructions": [
+        "Revisa cada axila con las yemas de los dedos, con el brazo ligeramente levantado.",
+        "Observa cada pezón y presiónalo con suavidad."
+      ],
+      "look_for": [
+        "Bultos en la axila.",
+        "Salida de líquido por el pezón sin presionarlo, sobre todo si es con sangre.",
+        "Costras, heridas o descamación en el pezón o la areola."
+      ]
+    }
+  ],
+  "closing": "Si notaste algo distinto, regístralo en tu diario y consulta a tu médico. La mayoría de los cambios no son graves, pero solo una valoración médica puede decirlo.",
+  "disclaimer": "Herramienta de apoyo al diagnóstico. No sustituye el criterio ni la consulta médica."
+}
