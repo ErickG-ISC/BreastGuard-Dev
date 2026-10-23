@@ -11,7 +11,7 @@ from backend.app.api.v1.internal import get_email_sender
 from backend.app.db import get_engine, new_session
 from backend.app.main import app
 from backend.app.services import reminders
-from backend.app.services.email import EmailError
+from backend.app.services.email import ConsoleEmailSender, EmailError
 from backend.app.services.unsubscribe import read_token
 from tests.helpers import auth_headers
 
@@ -254,8 +254,6 @@ class TestCorreo:
         assert channels == ["in_app"]
 
     def test_los_logs_no_llevan_el_correo_completo(self, client, world, owner_engine, caplog):
-        from backend.app.services.email import ConsoleEmailSender
-
         configure(client, world["a1"])
         make_due(owner_engine, world["a1"])
         app.dependency_overrides[get_email_sender] = ConsoleEmailSender
@@ -306,3 +304,39 @@ class TestAislamiento:
         with new_session() as db:
             count = db.execute(text("SELECT count(*) FROM clinical.patients")).scalar_one()
         assert count == 0
+
+
+class TestHuerfanos:
+    def _orphan(self, owner_engine, user, age):
+        with owner_engine.begin() as conn:
+            reminder_id = conn.execute(
+                text("SELECT id FROM control.reminders WHERE user_id = :u"), {"u": user.id}
+            ).scalar_one()
+            conn.execute(
+                text(
+                    "INSERT INTO control.reminder_notices (tenant_id, user_id, reminder_id, kind, "
+                    "due_at, email_status, created_at) VALUES (:t, :u, :r, 'self_exam', "
+                    "now() - :age, 'pending', now() - :age)"
+                ),
+                {"t": user.tenant_id, "u": user.id, "r": reminder_id, "age": age},
+            )
+
+    def test_pending_viejo_se_reintenta_una_vez(self, client, sender, world, owner_engine):
+        configure(client, world["a1"])
+        self._orphan(owner_engine, world["a1"], timedelta(minutes=30))
+        first = client.post(DISPATCH, headers=HEADERS).json()
+        assert first == {"claimed": 0, "emailed": 1, "failed": 0}
+        assert [n.email_status for n in notices(owner_engine)] == ["sent"]
+        assert client.post(DISPATCH, headers=HEADERS).json()["emailed"] == 0
+
+    def test_pending_reciente_no_se_toca(self, client, sender, world, owner_engine):
+        configure(client, world["a1"])
+        self._orphan(owner_engine, world["a1"], timedelta(minutes=1))
+        assert client.post(DISPATCH, headers=HEADERS).json()["emailed"] == 0
+        assert [n.email_status for n in notices(owner_engine)] == ["pending"]
+
+    def test_tras_la_baja_no_se_reintenta(self, client, sender, world, owner_engine):
+        configure(client, world["a1"], channels=["in_app"])
+        self._orphan(owner_engine, world["a1"], timedelta(minutes=30))
+        assert client.post(DISPATCH, headers=HEADERS).json()["emailed"] == 0
+        assert sender.sent == []

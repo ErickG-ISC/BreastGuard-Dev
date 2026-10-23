@@ -5,8 +5,10 @@ tenant_id del JWT en el servicio. Estas pruebas atacan ese filtro con pacientes 
 clínica y de otra.
 """
 
+import threading
 import uuid
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy import text
@@ -14,6 +16,7 @@ from sqlalchemy import text
 from backend.app.services.auth import create_access_token
 from backend.app.services.unsubscribe import make_token
 from tests.helpers import auth_headers
+from tests.pgtest import TEST_APP_ROLE
 
 API = "/api/v1"
 BODY = {
@@ -94,8 +97,6 @@ class TestConfiguracion:
 
     def test_la_hora_se_guarda_en_la_zona_de_la_paciente(self, client, world):
         body = save(client, world["a1"], timezone="America/Tijuana", local_time="09:00").json()
-        from zoneinfo import ZoneInfo
-
         local = datetime.fromisoformat(body["next_run_at"]).astimezone(ZoneInfo("America/Tijuana"))
         assert (local.hour, local.minute) == (9, 0)
         assert local.weekday() == 6 and local.day <= 7
@@ -252,3 +253,44 @@ class TestBaja:
         token = make_token(reminder_a2.id, world["a1"].id)
         assert client.post(f"{API}/reminders/unsubscribe", json={"token": token}).status_code == 204
         assert "email" in reminder_row(owner_engine, world["a2"]).channels
+
+
+class TestEndurecimiento:
+    def test_guardados_simultaneos_no_fallan(self, client, world, owner_engine):
+        results = []
+
+        def go(discreet):
+            results.append(save(client, world["a1"], discreet=discreet).status_code)
+
+        threads = [threading.Thread(target=go, args=(d,)) for d in (True, False, True, False)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert results == [200] * 4
+        with owner_engine.connect() as conn:
+            assert conn.execute(text("SELECT count(*) FROM control.reminders")).scalar_one() == 1
+
+    @pytest.mark.parametrize("column", ["user_id", "tenant_id", "kind", "id", "created_at"])
+    def test_app_user_no_actualiza_columnas_de_identidad(self, owner_engine, column):
+        with owner_engine.connect() as conn:
+            allowed = conn.execute(
+                text("SELECT has_column_privilege(:r, 'control.reminders', :c, 'UPDATE')"),
+                {"r": TEST_APP_ROLE, "c": column},
+            ).scalar_one()
+        assert allowed is False
+
+    @pytest.mark.parametrize(
+        "column", ["user_id", "tenant_id", "reminder_id", "kind", "due_at", "created_at"]
+    )
+    def test_app_user_no_actualiza_avisos_salvo_lectura_y_estado(self, owner_engine, column):
+        with owner_engine.connect() as conn:
+            allowed = conn.execute(
+                text("SELECT has_column_privilege(:r, 'control.reminder_notices', :c, 'UPDATE')"),
+                {"r": TEST_APP_ROLE, "c": column},
+            ).scalar_one()
+            can_delete = conn.execute(
+                text("SELECT has_table_privilege(:r, 'control.reminder_notices', 'DELETE')"),
+                {"r": TEST_APP_ROLE},
+            ).scalar_one()
+        assert allowed is False and can_delete is False
