@@ -2,6 +2,7 @@ import { Alert, Box, Button, Card, CardContent, Chip, Stack, Typography } from '
 import { useEffect, useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import { api } from '../../api/client';
+import { NOTICE_TEXT, useNotices } from '../../notices/NoticesContext';
 import { DISCLAIMER } from '../../components/Layout';
 import { QuestionnaireResult } from './Questionnaire';
 
@@ -34,6 +35,26 @@ export function ImageGuide() {
   );
 }
 
+function NoticeCards() {
+  const { notices, markRead } = useNotices();
+  return notices.slice(0, 2).map((notice) => {
+    const text = NOTICE_TEXT[notice.kind];
+    return (
+      <Alert
+        key={notice.id}
+        severity="info"
+        action={
+          <Button component={RouterLink} to={text.to} onClick={() => markRead(notice.id)} size="small">
+            {text.action}
+          </Button>
+        }
+      >
+        {text.title}
+      </Alert>
+    );
+  });
+}
+
 export default function PatientHome() {
   const [subscription, setSubscription] = useState(null);
   const [questionnaire, setQuestionnaire] = useState(undefined);
@@ -55,6 +76,8 @@ export default function PatientHome() {
           </Typography>
           {subscription && <Chip label={`Plan ${subscription.plan.name} (simulado)`} />}
         </Stack>
+
+        <NoticeCards />
 
         <Card variant="outlined">
           <CardContent>

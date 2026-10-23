@@ -14,6 +14,8 @@ import History from './pages/patient/History';
 import Diary from './pages/patient/Diary';
 import More from './pages/patient/More';
 import SelfExam from './pages/patient/SelfExam';
+import Reminders from './pages/patient/Reminders';
+import Unsubscribe from './pages/Unsubscribe';
 import Tenants from './pages/admin/Tenants';
 import theme from './theme';
 
@@ -27,6 +29,7 @@ function App() {
             <Route path="/" element={<Home />} />
             <Route path="/login" element={<Login />} />
             <Route path="/registro" element={<Register />} />
+            <Route path="/baja" element={<Unsubscribe />} />
             <Route
               path="/admin/tenants"
               element={
@@ -51,6 +54,7 @@ function App() {
               <Route path="/diario" element={<Diary />} />
               <Route path="/mas" element={<More />} />
               <Route path="/autoexploracion" element={<SelfExam />} />
+              <Route path="/recordatorios" element={<Reminders />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
