@@ -78,6 +78,20 @@ export default function PatientHome() {
         <Card variant="outlined">
           <CardContent>
             <Typography variant="h6" component="h2" sx={{ mb: 1 }}>
+              Autoexploración guiada
+            </Typography>
+            <Typography variant="body2" sx={{ mb: 2 }}>
+              Conoce cómo se ven y se sienten normalmente tus mamas para notar cualquier cambio. Te guiamos paso a paso.
+            </Typography>
+            <Button component={RouterLink} to="/autoexploracion" variant="outlined">
+              Comenzar autoexploración
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card variant="outlined">
+          <CardContent>
+            <Typography variant="h6" component="h2" sx={{ mb: 1 }}>
               Tus antecedentes
             </Typography>
             {questionnaire ? (
