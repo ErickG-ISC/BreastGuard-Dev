@@ -329,3 +329,36 @@ class TestAccesoCruzado:
         staff = user_factory(world["ta"], role=role)
         response = client.post(f"{API}/symptoms", json=entry_body(), headers=auth_headers(staff))
         assert response.status_code == 403
+
+
+class TestEndurecimientoBase:
+    def test_set_null_conserva_tenant_y_paciente(self, client, world, owner_engine):
+        a1 = world["a1"]
+        exam = finished_self_exam(client, a1)
+        entry = create_entry(client, a1, self_exam_id=exam["id"])
+        client.delete(f"{API}/self-exams/{exam['id']}", headers=auth_headers(a1))
+        with owner_engine.connect() as conn:
+            row = conn.execute(
+                text(
+                    "SELECT tenant_id, patient_id, self_exam_id FROM clinical.symptom_entries "
+                    "WHERE id = :id"
+                ),
+                {"id": entry["id"]},
+            ).one()
+        assert row == (world["ta"].id, a1.patient_id, None)
+
+    @pytest.mark.parametrize(
+        ("column", "value"),
+        [
+            ("patient_id", "gen_random_uuid()"),
+            ("tenant_id", "gen_random_uuid()"),
+            ("created_by", "NULL"),
+        ],
+    )
+    def test_app_user_no_puede_actualizar_columnas_fijas(self, client, world, column, value):
+        entry = create_entry(client, world["a1"])
+        with tenant_session(world["a1"]) as session, pytest.raises(DBAPIError, match="permission"):
+            session.execute(
+                text(f"UPDATE clinical.symptom_entries SET {column} = {value} WHERE id = :id"),
+                {"id": entry["id"]},
+            )
