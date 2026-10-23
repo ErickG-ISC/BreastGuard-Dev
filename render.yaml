@@ -38,3 +38,10 @@ services:
       # Render agrega la IP del cliente al final de X-Forwarded-For (ADR 0004)
       - key: TRUSTED_PROXY_HOPS
         value: "1"
+      # Recordatorios (ADR 0007): el mismo secreto va en GitHub > Secrets (REMINDER_CRON_SECRET)
+      - key: REMINDER_CRON_SECRET
+        sync: false
+      - key: EMAIL_BACKEND
+        value: console
+      - key: PUBLIC_APP_URL
+        sync: false

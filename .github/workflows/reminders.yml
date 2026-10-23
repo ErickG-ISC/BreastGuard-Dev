@@ -1,0 +1,40 @@
+name: Recordatorios
+
+# Llama al despachador de recordatorios (CU-05) cada 15 minutos. De paso despierta a Render
+# (plan gratuito), por eso se reintenta con esperas largas. El despachador es idempotente: si
+# dos ejecuciones se cruzan, ningún aviso se duplica (ADR 0007).
+#
+# Configuración en GitHub (Settings > Secrets and variables > Actions):
+#   - Secret   REMINDER_CRON_SECRET: el mismo valor que en Render (32+ caracteres)
+#   - Variable API_URL: URL pública del backend, sin /api/v1 (p. ej. https://breastguard-dev.onrender.com)
+# Nota: GitHub suele retrasar los cron unos minutos y solo los corre en la rama por defecto.
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: recordatorios
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Despachar recordatorios vencidos
+        env:
+          CRON_SECRET: ${{ secrets.REMINDER_CRON_SECRET }}
+          API_URL: ${{ vars.API_URL }}
+        run: |
+          if [ -z "$CRON_SECRET" ] || [ -z "$API_URL" ]; then
+            echo "Faltan REMINDER_CRON_SECRET o API_URL; no se despacha." >&2
+            exit 1
+          fi
+          curl --fail --silent --show-error \
+            --retry 4 --retry-delay 20 --retry-all-errors --max-time 90 \
+            -X POST -H "X-Cron-Secret: ${CRON_SECRET}" \
+            "${API_URL%/}/api/v1/internal/reminders/dispatch"
