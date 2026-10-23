@@ -15,6 +15,8 @@ import Diary from './pages/patient/Diary';
 import More from './pages/patient/More';
 import SelfExam from './pages/patient/SelfExam';
 import Reminders from './pages/patient/Reminders';
+import Blog from './pages/patient/Blog';
+import BlogArticle from './pages/patient/BlogArticle';
 import Unsubscribe from './pages/Unsubscribe';
 import Tenants from './pages/admin/Tenants';
 import theme from './theme';
@@ -55,6 +57,8 @@ function App() {
               <Route path="/mas" element={<More />} />
               <Route path="/autoexploracion" element={<SelfExam />} />
               <Route path="/recordatorios" element={<Reminders />} />
+              <Route path="/informacion" element={<Blog />} />
+              <Route path="/informacion/:slug" element={<BlogArticle />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

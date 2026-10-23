@@ -1,9 +1,20 @@
-import { Box, Typography } from '@mui/material';
+import { Box, Link, Typography } from '@mui/material';
 
-// Renderiza el subconjunto de markdown que usan nuestros textos (títulos, listas, **negritas**).
-// Sin dangerouslySetInnerHTML: todo se pinta como texto.
+// Renderiza el subconjunto de markdown que usan nuestros textos (títulos, listas, **negritas**,
+// *cursivas* y enlaces [texto](https://...)). Sin dangerouslySetInnerHTML: todo se pinta como
+// texto, y solo se enlazan URLs https (nunca javascript: ni rutas relativas).
+const LINK = /^\[([^\]]+)\]\((https:\/\/[^)\s]+)\)$/;
+
 function inline(text) {
-  return text.split(/(\*\*[^*]+\*\*|\*[^*]+\*)/g).map((part, i) => {
+  return text.split(/(\[[^\]]+\]\(https:\/\/[^)\s]+\)|\*\*[^*]+\*\*|\*[^*]+\*)/g).map((part, i) => {
+    const link = part.match(LINK);
+    if (link) {
+      return (
+        <Link key={i} href={link[2]} target="_blank" rel="noopener noreferrer">
+          {link[1]}
+        </Link>
+      );
+    }
     if (part.startsWith('**') && part.endsWith('**')) return <strong key={i}>{part.slice(2, -2)}</strong>;
     if (part.startsWith('*') && part.endsWith('*')) return <em key={i}>{part.slice(1, -1)}</em>;
     return part;
