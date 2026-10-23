@@ -26,6 +26,10 @@ PUBLIC_ROUTES = {
     ("GET", "/api/v1/self-exam/guide"),
     # Baja de recordatorios desde el correo: token firmado propio (tests/api/test_reminders.py)
     ("POST", "/api/v1/reminders/unsubscribe"),
+    # CU-06: contenido educativo general, sin datos de pacientes
+    ("GET", "/api/v1/blog"),
+    ("GET", "/api/v1/blog/faq"),
+    ("GET", "/api/v1/blog/{slug}"),
 }
 # Autenticadas con un secreto compartido, no con JWT (tests/api/test_dispatcher.py)
 SECRET_ROUTES = {("POST", "/api/v1/internal/reminders/dispatch")}
