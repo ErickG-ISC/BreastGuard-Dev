@@ -1,16 +1,20 @@
 """Esquema `control`: tenants e identidad (sin RLS, sin datos clínicos; ADR 0003)."""
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime, time
 
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
+    SmallInteger,
     Text,
+    Time,
     UniqueConstraint,
     func,
     text,
@@ -132,3 +136,93 @@ class Subscription(Base):
     )
     status: Mapped[str] = mapped_column(Text, server_default="simulada")
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Reminder(Base):
+    """Recordatorio de una paciente (CU-05). Configuración, no datos clínicos (ADR 0007)."""
+
+    __tablename__ = "reminders"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "user_id"],
+            ["control.users.tenant_id", "control.users.id"],
+            name="fk_reminders_user",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint("user_id", "kind", name="uq_reminders_user_kind"),
+        CheckConstraint("kind IN ('self_exam', 'repeat_analysis')", name="ck_reminders_kind"),
+        CheckConstraint(
+            "(frequency = 'first_sunday' AND interval_n IS NULL) "
+            "OR (frequency = 'every_n_days' AND interval_n BETWEEN 1 AND 90) "
+            "OR (frequency = 'every_n_months' AND interval_n BETWEEN 1 AND 24)",
+            name="ck_reminders_frequency",
+        ),
+        CheckConstraint(
+            "extract(minute FROM local_time)::int % 15 = 0 AND extract(second FROM local_time) = 0",
+            name="ck_reminders_local_time",
+        ),
+        CheckConstraint(
+            "cardinality(channels) >= 1 AND channels <@ ARRAY['in_app', 'email']::text[]",
+            name="ck_reminders_channels",
+        ),
+        Index("ix_reminders_due", "next_run_at", postgresql_where=text("active")),
+        {"schema": "control"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    kind: Mapped[str] = mapped_column(Text)
+    frequency: Mapped[str] = mapped_column(Text)
+    interval_n: Mapped[int | None] = mapped_column(SmallInteger)
+    local_time: Mapped[time] = mapped_column(Time)
+    timezone: Mapped[str] = mapped_column(Text)
+    anchor_date: Mapped[date] = mapped_column(Date)
+    channels: Mapped[list[str]] = mapped_column(ARRAY(Text))
+    discreet: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    next_run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ReminderNotice(Base):
+    """Aviso del despachador: se muestra en la app y, si la paciente lo pidió, va por correo."""
+
+    __tablename__ = "reminder_notices"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "user_id"],
+            ["control.users.tenant_id", "control.users.id"],
+            name="fk_reminder_notices_user",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint("reminder_id", "due_at", name="uq_reminder_notices_due"),
+        CheckConstraint(
+            "email_status IN ('none', 'pending', 'sent', 'failed')",
+            name="ck_reminder_notices_email_status",
+        ),
+        CheckConstraint(
+            "kind IN ('self_exam', 'repeat_analysis')", name="ck_reminder_notices_kind"
+        ),
+        Index("ix_reminder_notices_user", "user_id", "created_at"),
+        {"schema": "control"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    reminder_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("control.reminders.id", name="fk_reminder_notices_reminder", ondelete="CASCADE"),
+    )
+    kind: Mapped[str] = mapped_column(Text)
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    email_status: Mapped[str] = mapped_column(Text, server_default="none")
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

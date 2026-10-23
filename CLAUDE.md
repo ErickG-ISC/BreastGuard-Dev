@@ -70,7 +70,7 @@ npm run preview
 
 Todos los secretos vienen de variables de entorno. Ver `.env.example` (raíz) y `frontend/.env.example`. `main.py` llama `load_dotenv()` antes de importar el resto.
 
-Variables existentes: `DATABASE_URL`, `SECRET_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`, `SUPABASE_BUCKET`, `FRONTEND_ORIGIN`, `MODEL_BUCKET`, `MODEL_PREFIX`, `MODEL_DIR`, `MAX_CONCURRENT_INFERENCES`, `MAX_UPLOAD_MB` (opcional, 10 por defecto), y `VITE_API_URL` en el frontend.
+Variables existentes: `REMINDER_CRON_SECRET`, `EMAIL_BACKEND`, `EMAIL_FROM_NAME`, `PUBLIC_APP_URL` (CU-05), `DATABASE_URL`, `SECRET_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`, `SUPABASE_BUCKET`, `FRONTEND_ORIGIN`, `MODEL_BUCKET`, `MODEL_PREFIX`, `MODEL_DIR`, `MAX_CONCURRENT_INFERENCES`, `MAX_UPLOAD_MB` (opcional, 10 por defecto), y `VITE_API_URL` en el frontend.
 
 Variables de la multitenencia (ADR 0003):
 - `DATABASE_URL` — rol **dueño/migrador**; solo lo usan Alembic y los scripts de mantenimiento. La app toma de aquí solo host, puerto, base y sufijo del usuario (`postgres.<ref>` → `app_user.<ref>`), así que en Render puede ir sin la contraseña del dueño.
@@ -127,6 +127,11 @@ Reglas de infraestructura:
   - Tabla `clinical.symptom_entries` (0010): códigos fijos de lado, zona y síntomas (CHECK), intensidad 0–10, nota (máx. 2000), ciclo opcional. FK `(tenant_id, patient_id, self_exam_id) → self_exams` con `ON DELETE SET NULL (self_exam_id)`: la base impide enlazar la autoexploración de otra paciente aunque sea del mismo tenant (las FKs no pasan por RLS). `tenant_fk` acepta `ondelete`.
   - `get_entries(db, auth, since)` es la función reutilizable para el paquete de CU-07; no audita (audita quien la llama).
   - Auditoría `symptom.create|read|list|update|delete|denied`, sin contenido de la nota. El engine usa `hide_parameters=True` para que ningún error vuelque notas en logs.
+- `api/v1/reminders.py` + `services/reminders.py` (CU-05, ADR 0007): `GET /reminders`, `PUT` y `DELETE /reminders/{self_exam|repeat_analysis}`, `GET /notices?unread=`, `POST /notices/{id}/read` (solo pacientes) y `POST /reminders/unsubscribe` (público, token firmado de audiencia propia).
+  - Tablas `control.reminders` y `control.reminder_notices` (0011), **en control, sin RLS**: solo configuración. Toda consulta pasa por `_own_reminders` / `_own_notices` (user_id + tenant_id del JWT).
+  - `services/reminder_schedule.py`: `next_run` puro (primer domingo, cada N días, cada N meses; zonas IANA con `tzdata`; huecos de horario hacia adelante, horas ambiguas a la primera).
+  - Despachador `POST /internal/reminders/dispatch` (header `X-Cron-Secret` = `REMINDER_CRON_SECRET`, 32+ caracteres; sin él responde 503): `FOR UPDATE SKIP LOCKED` + `UNIQUE (reminder_id, due_at)`, un aviso aunque haya atrasos, correo fuera de la transacción. Usa la sesión de control sin contexto: nunca ve `clinical`. Lo llama `.github/workflows/reminders.yml` cada 15 min (secret `REMINDER_CRON_SECRET` y variable `API_URL` en GitHub). Local: `python -m backend.scripts.dispatch_reminders`.
+  - `services/email.py`: solo `EMAIL_BACKEND=console` (registra destinatario enmascarado y asunto). Modo discreto por defecto: sin marca ni tema. Siempre lleva enlace de baja (`PUBLIC_APP_URL/baja?token=`).
 - `api/v1/images.py`: `POST /upload` (paciente), `GET /images` y `GET /images/{id}` (con URL firmada; ajena o inexistente da el mismo 404). Lecturas, subidas y accesos denegados (`image.denied`) auditados.
 - `api/v1/audit.py`: `GET /audit` para `tenant_admin` con filtros `from`, `to`, `actor_id`, `limit` y `offset`.
 - `api/rate_limit.py`: límites por IP y ruta: `/auth/token` 10/min, `/auth/register` 5/min, `/images/upload` 20/min. La IP sale de `api/client_ip.py`: ignora `X-Forwarded-For` salvo con `TRUSTED_PROXY_HOPS` (en Render, `1`; ver ADR 0004).
@@ -145,7 +150,7 @@ SPA estándar: `main.jsx` monta `App.jsx` (tema, `AuthProvider` y rutas con `rea
 - `api/client.js`: axios con el Bearer del JWT, guardado en `sessionStorage`; un 401 cierra la sesión.
 - `auth/AuthContext.jsx`: login (`/auth/token`) y el usuario actual (`/auth/me`).
 - `components/ProtectedRoute.jsx` (por rol) y `components/Layout.jsx`, con el aviso de herramienta de apoyo.
-- Rutas públicas: `/`, `/login`, `/registro`. Paciente: `/paciente`, `/cuestionario`, `/analizar`, `/resultado/:id`, `/historial`, `/diario`, `/mas`, `/autoexploracion`. `platform_admin`: `/admin/tenants` (crear institución, activar/desactivar y chequeo de aislamiento).
+- Rutas públicas: `/`, `/login`, `/registro`. Paciente: `/paciente`, `/cuestionario`, `/analizar`, `/resultado/:id`, `/historial`, `/diario`, `/mas`, `/autoexploracion`, `/recordatorios`. Pública: `/baja` (confirmar baja del correo). `platform_admin`: `/admin/tenants` (crear institución, activar/desactivar y chequeo de aislamiento).
 
 ### Brechas conocidas (resolver en este orden)
 
@@ -160,6 +165,8 @@ Pendientes:
 2. Si falla el commit después de subir a Storage, queda un objeto huérfano.
 3. El límite de peticiones es en memoria (una sola instancia); con varias instancias haría falta un almacén compartido.
 4. `legacy.users` conserva emails y hashes del prototipo; borrar el esquema `legacy` cuando ya no haga falta.
+5. La política de paciente deja a `doctor` y `tenant_admin` hacer UPDATE/DELETE en las tablas de la paciente (self_exams, symptom_entries) a nivel de base; hoy solo la app lo impide (endpoints solo de paciente). Decidir en la Semana 4 si se restringe por comando.
+6. Correo real de recordatorios (Resend/Brevo) pendiente: hoy solo consola + aviso en la app.
 
 ## Arquitectura objetivo: multitenencia con RLS (REGLAS INNEGOCIABLES)
 

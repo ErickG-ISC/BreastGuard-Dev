@@ -18,8 +18,10 @@ import {
 } from '@mui/material';
 import { Link as RouterLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
+import { NoticesProvider } from '../notices/NoticesContext';
 import { LogoutIcon } from './icons';
 import { DISCLAIMER } from './Layout';
+import NoticeBell from './NoticeBell';
 import { PRIMARY_NAV, SECONDARY_NAV, activePrimary, isActive } from './patientNav';
 
 const DRAWER_WIDTH = 240;
@@ -102,27 +104,29 @@ export default function PatientShell() {
   const desktop = useMediaQuery((theme) => theme.breakpoints.up('md'));
 
   return (
-    <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: 'background.default' }}>
-      {desktop && <SideNav pathname={pathname} onLogout={logout} />}
-      <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-        {!desktop && (
+    <NoticesProvider>
+      <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: 'background.default' }}>
+        {desktop && <SideNav pathname={pathname} onLogout={logout} />}
+        <Box sx={{ flexGrow: 1, minWidth: 0 }}>
           <AppBar position="sticky" sx={{ borderBottom: 1, borderColor: 'divider' }}>
             <Toolbar sx={{ gap: 1 }}>
+              {/* En escritorio la marca está en la barra lateral */}
               <Typography variant="h6" component="div" color="primary" sx={{ flexGrow: 1 }}>
-                BreastGuard
+                {desktop ? '' : 'BreastGuard'}
               </Typography>
-              <Button onClick={logout}>Salir</Button>
+              <NoticeBell />
+              {!desktop && <Button onClick={logout}>Salir</Button>}
             </Toolbar>
           </AppBar>
-        )}
-        <Container component="main" maxWidth="md" sx={{ py: 3, px: 2, pb: desktop ? 4 : 12 }}>
-          <Outlet />
-          <Typography variant="caption" color="text.secondary" component="p" sx={{ mt: 4 }}>
-            {DISCLAIMER}
-          </Typography>
-        </Container>
+          <Container component="main" maxWidth="md" sx={{ py: 3, px: 2, pb: desktop ? 4 : 12 }}>
+            <Outlet />
+            <Typography variant="caption" color="text.secondary" component="p" sx={{ mt: 4 }}>
+              {DISCLAIMER}
+            </Typography>
+          </Container>
+        </Box>
+        {!desktop && <BottomNav pathname={pathname} />}
       </Box>
-      {!desktop && <BottomNav pathname={pathname} />}
-    </Box>
+    </NoticesProvider>
   );
 }

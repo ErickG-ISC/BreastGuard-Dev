@@ -99,6 +99,23 @@ PROTECTED = {
     "symptoms_detail": ("GET", f"{API}/symptoms/{SOME_ID}", {}),
     "symptoms_update": ("PATCH", f"{API}/symptoms/{SOME_ID}", {"json": {"intensity": 2}}),
     "symptoms_delete": ("DELETE", f"{API}/symptoms/{SOME_ID}", {}),
+    # CU-05 (solo pacientes)
+    "reminders_list": ("GET", f"{API}/reminders", {}),
+    "reminders_put": (
+        "PUT",
+        f"{API}/reminders/self_exam",
+        {
+            "json": {
+                "frequency": "first_sunday",
+                "local_time": "09:00",
+                "timezone": "America/Mexico_City",
+                "channels": ["in_app"],
+            }
+        },
+    ),
+    "reminders_delete": ("DELETE", f"{API}/reminders/self_exam", {}),
+    "notices_list": ("GET", f"{API}/notices", {}),
+    "notices_read": ("POST", f"{API}/notices/{SOME_ID}/read", {}),
 }
 PATIENT_ONLY_ENDPOINTS = [
     "subscription_get",
@@ -121,6 +138,11 @@ PATIENT_ONLY_ENDPOINTS = [
     "symptoms_detail",
     "symptoms_update",
     "symptoms_delete",
+    "reminders_list",
+    "reminders_put",
+    "reminders_delete",
+    "notices_list",
+    "notices_read",
 ]
 ADMIN_ENDPOINTS = [name for name in PROTECTED if name.startswith("admin_")]
 

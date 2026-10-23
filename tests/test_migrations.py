@@ -20,7 +20,15 @@ from tests.pgtest import (
 )
 
 APP_SCHEMAS = {"control", "clinical"}
-CONTROL_TABLES = {"tenants", "users", "consents", "plans", "subscriptions"}
+CONTROL_TABLES = {
+    "tenants",
+    "users",
+    "consents",
+    "plans",
+    "subscriptions",
+    "reminders",
+    "reminder_notices",
+}
 CLINICAL_TABLES = {
     "patients",
     "medical_images",
