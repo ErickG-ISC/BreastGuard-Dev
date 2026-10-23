@@ -31,6 +31,7 @@ os.environ["APP_DATABASE_URL"] = APP_URL.render_as_string(hide_password=False)
 os.environ["APP_DB_USER"] = TEST_APP_ROLE
 os.environ["APP_DB_PASSWORD"] = TEST_APP_PASSWORD
 os.environ["SECRET_KEY"] = "clave-solo-para-pruebas"
+os.environ["REMINDER_CRON_SECRET"] = "secreto-de-cron-solo-para-pruebas-0123456789"
 os.environ["SUPABASE_URL"] = "http://localhost:54321"
 os.environ["SUPABASE_KEY"] = "clave-falsa"
 os.environ["SUPABASE_BUCKET"] = "bucket-de-prueba"

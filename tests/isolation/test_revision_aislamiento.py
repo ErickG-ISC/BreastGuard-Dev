@@ -24,7 +24,11 @@ PUBLIC_ROUTES = {
     ("GET", "/api/v1/consent/current"),
     ("GET", "/api/v1/plans"),
     ("GET", "/api/v1/self-exam/guide"),
+    # Baja de recordatorios desde el correo: token firmado propio (tests/api/test_reminders.py)
+    ("POST", "/api/v1/reminders/unsubscribe"),
 }
+# Autenticadas con un secreto compartido, no con JWT (tests/api/test_dispatcher.py)
+SECRET_ROUTES = {("POST", "/api/v1/internal/reminders/dispatch")}
 # Guarda contra un falso verde: si la enumeración de rutas deja de funcionar, esto falla
 MIN_EXPECTED_ROUTES = 20
 
@@ -54,7 +58,7 @@ def test_todo_endpoint_es_publico_declarado_o_esta_en_la_matriz_cruzada():
     assert len(operations) >= MIN_EXPECTED_ROUTES
     uncovered = []
     for method, path in operations:
-        if (method, path) in PUBLIC_ROUTES:
+        if (method, path) in PUBLIC_ROUTES | SECRET_ROUTES:
             continue
         pattern = _template_regex(path)
         if not any(m == method and pattern.match(p) for m, p, _ in PROTECTED.values()):
