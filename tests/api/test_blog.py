@@ -93,6 +93,8 @@ class TestParser:
             ("fuentes: [https://example.org]", "fuentes: [http://example.org]"),
             ("lectura_min: 2\n", ""),
             ("---\nslug", "slug"),
+            ("lectura_min: 2", "lectura_min: dos"),
+            ("fecha_revision:", "fecha_revision: ayer"),
         ],
     )
     def test_invalido(self, old, new):
