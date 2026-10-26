@@ -4,9 +4,14 @@ Demostración de separación: como todo dato clínico lleva tenant_id, purgar un
 sus filas sin tocar las de nadie más. Usa el rol DUEÑO (DATABASE_URL) porque la app no tiene
 DELETE en audit_log ni en control; nunca lo hace la app en ejecución.
 
+La interfaz de administración solo SOLICITA la purga (desactiva y marca el tenant, ADR 0008);
+este script la ejecuta. La bitácora de plataforma (control.admin_events) se conserva y recibe un
+evento `tenant.purge`.
+
 Uso, desde la raíz del repo:
+    python -m backend.scripts.purge_tenant --pending              (purgas solicitadas en la UI)
     python -m backend.scripts.purge_tenant --slug clinica-x --dry-run
-    python -m backend.scripts.purge_tenant --slug clinica-x      (pide escribir el slug)
+    python -m backend.scripts.purge_tenant --slug clinica-x       (pide escribir el slug)
 """
 
 import argparse
@@ -49,8 +54,26 @@ def _require_bypass(conn: Connection) -> None:
         raise PurgeError("La purga requiere el rol dueño con BYPASSRLS (DATABASE_URL)")
 
 
+def pending_slugs(engine: Engine) -> list[str]:
+    """Tenants con purga solicitada desde la interfaz, del más antiguo al más reciente."""
+    with engine.connect() as conn:
+        return list(
+            conn.scalars(
+                text(
+                    "SELECT slug FROM control.tenants WHERE purge_requested_at IS NOT NULL "
+                    "ORDER BY purge_requested_at"
+                )
+            )
+        )
+
+
 def purge_tenant(
-    engine: Engine, slug: str, *, dry_run: bool = False, allow_b2c: bool = False
+    engine: Engine,
+    slug: str,
+    *,
+    dry_run: bool = False,
+    allow_b2c: bool = False,
+    require_request: bool = False,
 ) -> PurgeSummary:
     summary = PurgeSummary(slug=slug, dry_run=dry_run)
     with engine.connect() as conn:
@@ -58,12 +81,18 @@ def purge_tenant(
         try:
             _require_bypass(conn)
             tenant = conn.execute(
-                text("SELECT id, kind FROM control.tenants WHERE slug = :slug"), {"slug": slug}
+                text(
+                    "SELECT id, kind, purge_requested_at FROM control.tenants "
+                    "WHERE slug = :slug FOR UPDATE"
+                ),
+                {"slug": slug},
             ).first()
             if tenant is None:
                 raise PurgeError(f"No existe el tenant {slug!r}")
             if tenant.kind == "b2c" and not allow_b2c:
                 raise PurgeError("El tenant b2c solo se purga con --allow-b2c")
+            if require_request and tenant.purge_requested_at is None:
+                raise PurgeError(f"La purga de {slug!r} ya no está solicitada (¿se canceló?)")
 
             tables = set(
                 conn.scalars(
@@ -87,6 +116,10 @@ def purge_tenant(
                 )
                 summary.deleted[f"clinical.{table}"] = result.rowcount
             # Datos de cuenta ligados a los usuarios del tenant, antes de borrar los usuarios
+            result = conn.execute(
+                text("DELETE FROM control.invitations WHERE tenant_id = :id"), {"id": tenant.id}
+            )
+            summary.deleted["control.invitations"] = result.rowcount
             for table in ("reminder_notices", "reminders", "consents", "subscriptions"):
                 result = conn.execute(
                     text(
@@ -101,6 +134,14 @@ def purge_tenant(
                     text(f"DELETE FROM control.{table} WHERE {column} = :id"), {"id": tenant.id}
                 )
                 summary.deleted[f"control.{table}"] = result.rowcount
+            # La bitácora de plataforma se conserva (sin FK al tenant) y registra la purga
+            conn.execute(
+                text(
+                    "INSERT INTO control.admin_events (actor_role, action, tenant_id, "
+                    "target_type, target_id) VALUES ('system', 'tenant.purge', :id, 'tenant', :id)"
+                ),
+                {"id": tenant.id},
+            )
         except Exception:
             transaction.rollback()
             raise
@@ -111,12 +152,32 @@ def purge_tenant(
     return summary
 
 
+def _purge_files(slug: str) -> int:
+    from backend.app.services.storage import SupabaseStorage
+
+    try:
+        removed = SupabaseStorage().remove_prefix(f"{slug}/")
+    except Exception as exc:
+        print(
+            f"La base quedó purgada, pero falló Storage ({type(exc).__name__}). "
+            f"Quedan objetos bajo {slug}/: bórralos desde Supabase > Storage.",
+            file=sys.stderr,
+        )
+        return 2
+    print(f"Borrados {removed} objetos de Storage bajo {slug}/")
+    return 0
+
+
 def main() -> int:
     load_dotenv()
     import os
 
     parser = argparse.ArgumentParser(description="Desactiva y purga un tenant por slug")
-    parser.add_argument("--slug", required=True)
+    target_group = parser.add_mutually_exclusive_group(required=True)
+    target_group.add_argument("--slug")
+    target_group.add_argument(
+        "--pending", action="store_true", help="Purga los tenants solicitados desde la UI"
+    )
     parser.add_argument("--dry-run", action="store_true", help="Cuenta sin borrar nada")
     parser.add_argument("--allow-b2c", action="store_true")
     parser.add_argument("--keep-files", action="store_true", help="No borra objetos de Storage")
@@ -124,40 +185,41 @@ def main() -> int:
 
     target = make_url(os.environ["DATABASE_URL"])
     print(f"Base de destino: {target.host}:{target.port}/{target.database}")
-    if not args.dry_run:
-        typed = input(
-            f"Esto borra TODOS los datos de {args.slug!r}. Escribe el slug para confirmar: "
-        )
-        if typed.strip() != args.slug:
-            print("Confirmación incorrecta; no se borró nada.", file=sys.stderr)
-            return 1
-
     engine = create_engine(os.environ["DATABASE_URL"])
+    status = 0
     try:
-        summary = purge_tenant(engine, args.slug, dry_run=args.dry_run, allow_b2c=args.allow_b2c)
-    except PurgeError as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
+        slugs = pending_slugs(engine) if args.pending else [args.slug]
+        if not slugs:
+            print("No hay purgas solicitadas.")
+        for slug in slugs:
+            if not args.dry_run:
+                typed = input(
+                    f"Esto borra TODOS los datos de {slug!r}. Escribe el slug para confirmar: "
+                )
+                if typed.strip() != slug:
+                    print(f"Confirmación incorrecta; {slug!r} no se borró.", file=sys.stderr)
+                    status = 1
+                    continue
+            try:
+                summary = purge_tenant(
+                    engine,
+                    slug,
+                    dry_run=args.dry_run,
+                    allow_b2c=args.allow_b2c,
+                    require_request=args.pending,
+                )
+            except PurgeError as exc:
+                print(str(exc), file=sys.stderr)
+                status = 1
+                continue
+            verb = "Se borrarían" if args.dry_run else "Borradas"
+            for table, count in summary.deleted.items():
+                print(f"{verb} {count} filas de {table}")
+            if not args.dry_run and not args.keep_files:
+                status = max(status, _purge_files(slug))
     finally:
         engine.dispose()
-
-    verb = "Se borrarían" if args.dry_run else "Borradas"
-    for table, count in summary.deleted.items():
-        print(f"{verb} {count} filas de {table}")
-    if not args.dry_run and not args.keep_files:
-        from backend.app.services.storage import SupabaseStorage
-
-        try:
-            removed = SupabaseStorage().remove_prefix(f"{args.slug}/")
-        except Exception as exc:
-            print(
-                f"La base quedó purgada, pero falló Storage ({type(exc).__name__}). "
-                f"Quedan objetos bajo {args.slug}/: bórralos desde Supabase > Storage.",
-                file=sys.stderr,
-            )
-            return 2
-        print(f"Borrados {removed} objetos de Storage bajo {args.slug}/")
-    return 0
+    return status
 
 
 if __name__ == "__main__":

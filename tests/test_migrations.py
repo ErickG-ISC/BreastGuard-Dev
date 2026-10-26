@@ -21,6 +21,8 @@ from tests.pgtest import (
 
 APP_SCHEMAS = {"control", "clinical"}
 CONTROL_TABLES = {
+    "invitations",
+    "admin_events",
     "tenants",
     "users",
     "consents",

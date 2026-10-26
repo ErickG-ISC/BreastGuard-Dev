@@ -8,12 +8,14 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
 from backend.app.db import TenantContext, new_session
+from backend.app.services import email as email_service
 from backend.app.services.auth import (
     AuthContext,
     InvalidTokenError,
     decode_access_token,
     load_auth_context,
 )
+from backend.app.services.email import EmailSender
 from backend.app.services.storage import SupabaseStorage
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/token")
@@ -90,3 +92,11 @@ def get_storage() -> SupabaseStorage:
 
 
 Storage = Annotated[SupabaseStorage, Depends(get_storage)]
+
+
+def get_email_sender() -> EmailSender:
+    """Adaptador de correo según EMAIL_BACKEND; punto de override en pruebas."""
+    return email_service.get_sender()
+
+
+Sender = Annotated[EmailSender, Depends(get_email_sender)]

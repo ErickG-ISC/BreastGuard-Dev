@@ -1,4 +1,5 @@
 import ipaddress
+import math
 import os
 import uuid
 from dataclasses import dataclass
@@ -54,6 +55,7 @@ class TokenClaims:
     user_id: uuid.UUID
     tenant_id: uuid.UUID | None
     role: str
+    issued_at: datetime
 
 
 @dataclass(frozen=True)
@@ -80,11 +82,15 @@ def _dummy_hash() -> str:
 
 
 def create_access_token(user: User, expires_delta: timedelta | None = None) -> str:
-    expire = datetime.now(UTC) + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    now = datetime.now(UTC)
+    expire = now + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     claims = {
         "sub": str(user.id),
         "tenant_id": str(user.tenant_id) if user.tenant_id else None,
         "role": user.role,
+        # iat (en milisegundos, redondeado hacia abajo) permite invalidar las sesiones emitidas
+        # antes de un restablecimiento de acceso, aunque ocurran en el mismo segundo
+        "iat": math.floor(now.timestamp() * 1000) / 1000,
         "exp": expire,
     }
     return jwt.encode(claims, SECRET_KEY, algorithm=ALGORITHM)
@@ -97,7 +103,7 @@ def decode_access_token(token: str) -> TokenClaims:
             token,
             SECRET_KEY,
             algorithms=[ALGORITHM],
-            options={"require_exp": True, "require_sub": True},
+            options={"require_exp": True, "require_sub": True, "require_iat": True},
         )
         role = payload["role"]
         raw_tenant = payload["tenant_id"]
@@ -105,6 +111,7 @@ def decode_access_token(token: str) -> TokenClaims:
             user_id=uuid.UUID(payload["sub"]),
             tenant_id=uuid.UUID(raw_tenant) if raw_tenant is not None else None,
             role=role,
+            issued_at=datetime.fromtimestamp(float(payload["iat"]), UTC),
         )
     except (JWTError, KeyError, TypeError, ValueError, AttributeError):
         raise InvalidTokenError from None
@@ -127,6 +134,10 @@ def load_auth_context(db: Session, claims: TokenClaims) -> AuthContext | None:
         return None
     if tenant is not None and not tenant.is_active:
         return None
+    # Tokens emitidos antes de restablecer el acceso o de una desactivación (aunque se reactive)
+    for valid_after in (user.sessions_valid_after, tenant.sessions_valid_after if tenant else None):
+        if valid_after is not None and claims.issued_at < valid_after:
+            return None
     return AuthContext(
         user_id=user.id,
         tenant_id=user.tenant_id,
@@ -206,7 +217,8 @@ def _clean_ip(ip: str | None) -> str | None:
 def authenticate_user(db: Session, email: str, password: str) -> User | None:
     """None si el email no existe o la contraseña no coincide (mismo costo en ambos casos)."""
     user = get_user_by_email(db, email)
-    if user is None:
+    if user is None or user.hashed_password is None:
+        # Inexistente o invitada sin contraseña: mismo costo y misma respuesta
         verify_password(password, _dummy_hash())
         return None
     if not verify_password(password, user.hashed_password):

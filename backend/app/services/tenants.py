@@ -1,29 +1,40 @@
-"""Administración de plataforma (CU-12): tenants y usuarios en el esquema control.
+"""Administración de plataforma (CU-12, ADR 0008): tenants en el esquema control.
 
-Solo lo usa el platform_admin. Las únicas escrituras en clinical son los registros de
-auditoría de cada alta, con el contexto del tenant afectado aplicado solo a esa transacción
-(ADR 0002). El chequeo de aislamiento es de solo lectura y siempre termina en rollback.
+Solo lo usa el platform_admin, que NO tiene acceso a datos clínicos: las estadísticas son de
+control (personal, invitaciones, pacientes como conteo, último acceso). Cada cambio queda en la
+bitácora de plataforma (control.admin_events) en la misma transacción.
+
+La única escritura en clinical es el registro `tenant.create` en la auditoría del tenant nuevo,
+con su contexto aplicado solo a esa transacción: es la fila testigo del chequeo de aislamiento.
+La purga NO se ejecuta aquí: la UI la solicita y la hace purge_tenant.py con el rol dueño.
 """
 
 import re
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import select, text
+from sqlalchemy import case, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.app.db import TenantContext, apply_context, new_session, set_transaction_context
 from backend.app.models.control import Tenant, User
-from backend.app.schemas.tenants import IsolationReport, TenantCreate, TenantUserCreate
-from backend.app.services import audit
+from backend.app.schemas.tenants import (
+    IsolationReport,
+    TenantCreate,
+    TenantStats,
+    TenantUpdate,
+)
+from backend.app.services import admin_events, audit, invitations
 from backend.app.services.auth import AuthContext, get_password_hash, get_user_by_email
 
 _TABLE_NAME = re.compile(r"^[a-z_][a-z0-9_]*$")
+STAFF_ROLES = ("doctor", "tenant_admin")
 
 
 class ConflictError(Exception):
-    """Slug o email ya en uso."""
+    """Slug o email ya en uso, o estado incompatible."""
 
 
 class NotFoundError(Exception):
@@ -34,33 +45,42 @@ class InvalidOperationError(Exception):
     pass
 
 
-def _audit_in_tenant(
+@dataclass(frozen=True)
+class TenantWithStats:
+    tenant: Tenant
+    stats: TenantStats
+
+
+def _event(
     db: Session,
     actor: AuthContext,
-    tenant_id: uuid.UUID,
     action: str,
-    resource_type: str,
-    resource_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    target_type: str,
+    target_id: uuid.UUID,
     ip: str | None,
+    details: dict | None = None,
 ) -> None:
-    """Registra una acción del platform_admin en la auditoría DEL tenant afectado."""
-    set_transaction_context(db, TenantContext(tenant_id, actor.user_id, actor.role))
-    audit.record(
+    admin_events.record(
         db,
-        tenant_id=tenant_id,
         actor_id=actor.user_id,
         actor_role=actor.role,
         action=action,
-        resource_type=resource_type,
-        resource_id=resource_id,
+        tenant_id=tenant_id,
+        target_type=target_type,
+        target_id=target_id,
         ip=ip,
+        details=details,
     )
 
 
 def create_tenant(
     db: Session, actor: AuthContext, data: TenantCreate, ip: str | None
-) -> tuple[Tenant, User]:
-    """Tenant + slug + primer tenant_admin + auditoría en UNA transacción: todo o nada."""
+) -> tuple[Tenant, User, str]:
+    """Tenant + primer tenant_admin INVITADO + bitácora + auditoría, en UNA transacción.
+
+    Devuelve el token de invitación en claro para enviarlo DESPUÉS del commit.
+    """
     if db.scalars(select(Tenant.id).where(Tenant.slug == data.slug)).first():
         raise ConflictError("El slug ya está en uso")
     if get_user_by_email(db, data.admin_email):
@@ -72,14 +92,27 @@ def create_tenant(
         admin = User(
             tenant_id=tenant.id,
             email=data.admin_email,
-            hashed_password=get_password_hash(data.admin_password),
+            hashed_password=None,
             full_name=data.admin_full_name,
             role="tenant_admin",
         )
         db.add(admin)
         db.flush()
-        _audit_in_tenant(db, actor, tenant.id, "tenant.create", "tenant", tenant.id, ip)
-        _audit_in_tenant(db, actor, tenant.id, "user.create", "user", admin.id, ip)
+        token = invitations.issue(db, admin, "invite", actor.user_id)
+        _event(db, actor, "tenant.create", tenant.id, "tenant", tenant.id, ip, {"plan": data.plan})
+        _event(db, actor, "user.invite", tenant.id, "user", admin.id, ip, {"role": "tenant_admin"})
+        # Fila testigo del chequeo de aislamiento, en la auditoría DEL tenant nuevo
+        set_transaction_context(db, TenantContext(tenant.id, actor.user_id, actor.role))
+        audit.record(
+            db,
+            tenant_id=tenant.id,
+            actor_id=actor.user_id,
+            actor_role=actor.role,
+            action="tenant.create",
+            resource_type="tenant",
+            resource_id=tenant.id,
+            ip=ip,
+        )
         db.commit()
     except IntegrityError:
         db.rollback()
@@ -87,72 +120,151 @@ def create_tenant(
     except Exception:
         db.rollback()
         raise
-    return tenant, admin
+    return tenant, admin, token
 
 
-def list_tenants(db: Session) -> list[Tenant]:
-    return list(db.scalars(select(Tenant).order_by(Tenant.created_at)))
+def _stats_subquery():
+    staff = User.role.in_(STAFF_ROLES)
+    return (
+        select(
+            User.tenant_id.label("tenant_id"),
+            func.count().filter(staff).label("staff"),
+            func.count()
+            .filter(staff, User.is_active.is_(True), User.hashed_password.is_not(None))
+            .label("staff_active"),
+            func.count().filter(staff, User.hashed_password.is_(None)).label("pending"),
+            func.count().filter(User.role == "patient").label("patients"),
+            func.max(User.last_login_at).label("last_login_at"),
+        )
+        .where(User.tenant_id.is_not(None))
+        .group_by(User.tenant_id)
+        .subquery()
+    )
 
 
-def set_tenant_active(
-    db: Session, actor: AuthContext, tenant_id: uuid.UUID, active: bool, ip: str | None
-) -> Tenant:
-    tenant = db.get(Tenant, tenant_id)
+def _with_stats(rows) -> list[TenantWithStats]:
+    return [
+        TenantWithStats(
+            tenant=tenant,
+            stats=TenantStats(
+                staff=staff or 0,
+                staff_active=staff_active or 0,
+                invitations_pending=pending or 0,
+                patients=patients or 0,
+                last_login_at=last_login_at,
+            ),
+        )
+        for tenant, staff, staff_active, pending, patients, last_login_at in rows
+    ]
+
+
+def _select_with_stats():
+    stats = _stats_subquery()
+    return select(
+        Tenant,
+        stats.c.staff,
+        stats.c.staff_active,
+        stats.c.pending,
+        stats.c.patients,
+        stats.c.last_login_at,
+    ).outerjoin(stats, stats.c.tenant_id == Tenant.id)
+
+
+def list_tenants(
+    db: Session, *, q: str | None, active: bool | None, limit: int, offset: int
+) -> tuple[list[TenantWithStats], int]:
+    conditions = []
+    if q:
+        pattern = f"%{q.strip().lower()}%"
+        conditions.append(or_(func.lower(Tenant.name).like(pattern), Tenant.slug.like(pattern)))
+    if active is not None:
+        conditions.append(Tenant.is_active.is_(active))
+    total = db.scalar(select(func.count()).select_from(Tenant).where(*conditions))
+    rows = db.execute(
+        _select_with_stats()
+        .where(*conditions)
+        # El b2c compartido primero; luego por fecha de alta
+        .order_by(case((Tenant.kind == "b2c", 0), else_=1), Tenant.created_at, Tenant.id)
+        .limit(limit)
+        .offset(offset)
+    ).all()
+    return _with_stats(rows), total
+
+
+def get_tenant(db: Session, tenant_id: uuid.UUID) -> TenantWithStats:
+    rows = db.execute(_select_with_stats().where(Tenant.id == tenant_id)).all()
+    if not rows:
+        raise NotFoundError
+    return _with_stats(rows)[0]
+
+
+def update_tenant(
+    db: Session, actor: AuthContext, tenant_id: uuid.UUID, data: TenantUpdate, ip: str | None
+) -> TenantWithStats:
+    tenant = db.scalars(select(Tenant).where(Tenant.id == tenant_id).with_for_update()).first()
     if tenant is None:
         raise NotFoundError
-    if tenant.kind == "b2c" and not active:
+    changes = data.model_dump(exclude_unset=True)
+    if changes.get("is_active") is False and tenant.kind == "b2c":
         # Bloquearía a todas las pacientes y el registro público
-        raise InvalidOperationError("El tenant b2c no se desactiva desde la API")
-    tenant.is_active = active
-    db.flush()
-    action = "tenant.activate" if active else "tenant.deactivate"
-    _audit_in_tenant(db, actor, tenant.id, action, "tenant", tenant.id, ip)
+        raise InvalidOperationError("El tenant b2c compartido no se desactiva")
+    if changes.get("is_active") is True and tenant.purge_requested_at is not None:
+        raise InvalidOperationError("Cancela primero la purga solicitada")
+    fields = sorted(
+        k for k in ("name", "plan") if k in changes and changes[k] != getattr(tenant, k)
+    )
+    for name in fields:
+        setattr(tenant, name, changes[name])
+    if fields:
+        details = {"fields": fields} | ({"plan": changes["plan"]} if "plan" in fields else {})
+        _event(db, actor, "tenant.update", tenant.id, "tenant", tenant.id, ip, details)
+    if "is_active" in changes and changes["is_active"] != tenant.is_active:
+        tenant.is_active = changes["is_active"]
+        if not tenant.is_active:
+            # Al reactivar, los JWT de antes de la desactivación no deben revivir
+            tenant.sessions_valid_after = datetime.now(UTC)
+        action = "tenant.activate" if tenant.is_active else "tenant.deactivate"
+        _event(db, actor, action, tenant.id, "tenant", tenant.id, ip)
     db.commit()
-    return tenant
+    return get_tenant(db, tenant_id)
 
 
-def create_tenant_user(
-    db: Session, actor: AuthContext, tenant_id: uuid.UUID, data: TenantUserCreate, ip: str | None
-) -> User:
-    tenant = db.get(Tenant, tenant_id)
+def request_purge(
+    db: Session, actor: AuthContext, tenant_id: uuid.UUID, confirm_slug: str, ip: str | None
+) -> TenantWithStats:
+    """Desactiva y marca el tenant; el borrado lo hace purge_tenant.py --pending (rol dueño)."""
+    tenant = db.scalars(select(Tenant).where(Tenant.id == tenant_id).with_for_update()).first()
     if tenant is None:
         raise NotFoundError
     if tenant.kind == "b2c":
-        raise InvalidOperationError("El tenant b2c solo admite pacientes (registro público)")
-    if get_user_by_email(db, data.email):
-        raise ConflictError("El email ya está registrado")
-    try:
-        user = User(
-            tenant_id=tenant.id,
-            email=data.email,
-            hashed_password=get_password_hash(data.password),
-            full_name=data.full_name,
-            role=data.role,
-        )
-        db.add(user)
-        db.flush()
-        _audit_in_tenant(db, actor, tenant.id, "user.create", "user", user.id, ip)
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise ConflictError("El email ya está registrado") from None
-    return user
-
-
-def set_user_active(
-    db: Session, actor: AuthContext, user_id: uuid.UUID, active: bool, ip: str | None
-) -> User:
-    user = db.get(User, user_id)
-    if user is None or user.tenant_id is None:
-        # Los platform_admin no se gestionan por API
-        raise NotFoundError
-    user.is_active = active
-    user.updated_at = datetime.now(UTC)
-    db.flush()
-    action = "user.activate" if active else "user.deactivate"
-    _audit_in_tenant(db, actor, user.tenant_id, action, "user", user.id, ip)
+        raise InvalidOperationError("El tenant b2c compartido no se purga")
+    if confirm_slug.strip() != tenant.slug:
+        raise InvalidOperationError("El identificador escrito no coincide")
+    if tenant.purge_requested_at is not None:
+        raise ConflictError("La purga ya está solicitada")
+    tenant.is_active = False
+    tenant.sessions_valid_after = datetime.now(UTC)
+    tenant.purge_requested_at = datetime.now(UTC)
+    tenant.purge_requested_by = actor.user_id
+    _event(db, actor, "tenant.purge_request", tenant.id, "tenant", tenant.id, ip)
     db.commit()
-    return user
+    return get_tenant(db, tenant_id)
+
+
+def cancel_purge(
+    db: Session, actor: AuthContext, tenant_id: uuid.UUID, ip: str | None
+) -> TenantWithStats:
+    tenant = db.scalars(select(Tenant).where(Tenant.id == tenant_id).with_for_update()).first()
+    if tenant is None:
+        raise NotFoundError
+    if tenant.purge_requested_at is None:
+        raise ConflictError("No hay purga solicitada")
+    # El tenant sigue inactivo: reactivarlo es una decisión aparte
+    tenant.purge_requested_at = None
+    tenant.purge_requested_by = None
+    _event(db, actor, "tenant.purge_cancel", tenant.id, "tenant", tenant.id, ip)
+    db.commit()
+    return get_tenant(db, tenant_id)
 
 
 def create_platform_admin(db: Session, email: str, full_name: str, password: str) -> User:

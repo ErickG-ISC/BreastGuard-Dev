@@ -19,7 +19,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, INET, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, INET, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.app.models.base import Base
@@ -45,6 +45,11 @@ class Tenant(Base):
     plan: Mapped[str] = mapped_column(Text, server_default="basic")
     is_active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Desactivar el tenant invalida para siempre los JWT emitidos antes (aunque se reactive)
+    sessions_valid_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # La UI solo SOLICITA la purga; la ejecuta purge_tenant.py con el rol dueño (ADR 0008)
+    purge_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    purge_requested_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
 
 
 class User(Base):
@@ -71,12 +76,16 @@ class User(Base):
         UUID(as_uuid=True), ForeignKey("control.tenants.id", name="fk_users_tenant")
     )
     email: Mapped[str] = mapped_column(Text)
-    hashed_password: Mapped[str] = mapped_column(Text)
+    # NULL: cuenta invitada que aún no fija su contraseña (no puede iniciar sesión)
+    hashed_password: Mapped[str | None] = mapped_column(Text)
     full_name: Mapped[str] = mapped_column(Text)
     role: Mapped[str] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Los JWT emitidos antes de esta fecha dejan de valer (restablecer acceso)
+    sessions_valid_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Consent(Base):
@@ -226,3 +235,66 @@ class ReminderNotice(Base):
     email_status: Mapped[str] = mapped_column(Text, server_default="none")
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Invitation(Base):
+    """Invitación o restablecimiento de acceso de un solo uso; solo se guarda el sha256."""
+
+    __tablename__ = "invitations"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "user_id"],
+            ["control.users.tenant_id", "control.users.id"],
+            name="fk_invitations_user",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint("token_hash", name="uq_invitations_token_hash"),
+        CheckConstraint("purpose IN ('invite', 'reset')", name="ck_invitations_purpose"),
+        CheckConstraint("char_length(token_hash) = 64", name="ck_invitations_token_hash"),
+        Index("ix_invitations_user", "user_id"),
+        {"schema": "control"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    purpose: Mapped[str] = mapped_column(Text)
+    token_hash: Mapped[str] = mapped_column(Text)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AdminEvent(Base):
+    """Bitácora de plataforma: cambios administrativos (sin datos sensibles). Solo inserción."""
+
+    __tablename__ = "admin_events"
+    __table_args__ = (
+        CheckConstraint(
+            "actor_role IN ('platform_admin', 'tenant_admin', 'system', 'user')",
+            name="ck_admin_events_actor_role",
+        ),
+        CheckConstraint("target_type IN ('tenant', 'user')", name="ck_admin_events_target_type"),
+        Index("ix_admin_events_tenant", "tenant_id", "occurred_at"),
+        Index("ix_admin_events_occurred", "occurred_at"),
+        {"schema": "control"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    actor_role: Mapped[str] = mapped_column(Text)
+    action: Mapped[str] = mapped_column(Text)
+    tenant_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    target_type: Mapped[str] = mapped_column(Text)
+    target_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    ip: Mapped[str | None] = mapped_column(INET)
+    details: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))

@@ -41,7 +41,12 @@ services:
       # Recordatorios (ADR 0007): el mismo secreto va en GitHub > Secrets (REMINDER_CRON_SECRET)
       - key: REMINDER_CRON_SECRET
         sync: false
+      # "resend" para enviar invitaciones y recordatorios de verdad (ADR 0008)
       - key: EMAIL_BACKEND
         value: console
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        value: onboarding@resend.dev
       - key: PUBLIC_APP_URL
         sync: false

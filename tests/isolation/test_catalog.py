@@ -118,17 +118,27 @@ def test_permisos_minimos_de_la_app(owner_engine, table, privilege, expected):
 
 
 def test_update_de_control_solo_en_columnas_permitidas(owner_engine):
+    # users.role SÍ es actualizable desde 0012 (doctor <-> tenant_admin), pero un trigger de la
+    # base impide cualquier otro cambio (tests/api/test_admin_users.py lo prueba por SQL)
     [row] = rows(
         owner_engine,
-        "SELECT has_column_privilege(:role, 'control.users', 'role', 'UPDATE') AS role_upd, "
-        "has_column_privilege(:role, 'control.users', 'tenant_id', 'UPDATE') AS tenant_upd, "
+        "SELECT has_column_privilege(:role, 'control.users', 'tenant_id', 'UPDATE') AS tenant_upd, "
+        "has_column_privilege(:role, 'control.users', 'email', 'UPDATE') AS email_upd, "
+        "has_column_privilege(:role, 'control.tenants', 'kind', 'UPDATE') AS kind_upd, "
         "has_column_privilege(:role, 'control.tenants', 'slug', 'UPDATE') AS slug_upd, "
         "has_column_privilege(:role, 'clinical.medical_images', 'object_path', 'UPDATE') "
         "AS path_upd, "
         "has_column_privilege(:role, 'clinical.patients', 'user_id', 'UPDATE') AS patient_upd",
         role=TEST_APP_ROLE,
     )
-    assert not (row.role_upd or row.tenant_upd or row.slug_upd or row.path_upd or row.patient_upd)
+    assert not (
+        row.tenant_upd
+        or row.email_upd
+        or row.kind_upd
+        or row.slug_upd
+        or row.path_upd
+        or row.patient_upd
+    )
 
 
 def test_roles_de_la_data_api_sin_acceso(owner_engine):
