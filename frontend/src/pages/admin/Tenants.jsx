@@ -3,7 +3,7 @@ import {
   Box,
   Button,
   Card,
-  CardActions,
+  CardActionArea,
   CardContent,
   Chip,
   CircularProgress,
@@ -11,45 +11,50 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
-  FormControlLabel,
+  FormControl,
+  InputLabel,
   List,
   ListItem,
   ListItemText,
+  MenuItem,
+  Select,
   Stack,
-  Switch,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
   TextField,
+  ToggleButton,
+  ToggleButtonGroup,
   Typography,
+  useMediaQuery,
 } from '@mui/material';
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import { api, errorMessage } from '../../api/client';
-import Layout from '../../components/Layout';
+import IsolationDialog from '../../components/admin/IsolationDialog';
+import { PLAN_LABELS, emailNotice, formatDateTime } from './adminLabels';
 
-const EMPTY_FORM = {
-  name: '',
-  slug: '',
-  plan: 'basic',
-  admin_email: '',
-  admin_full_name: '',
-  admin_password: '',
-};
+const PAGE = 20;
+const EMPTY_FORM = { name: '', slug: '', plan: 'basic', admin_email: '', admin_full_name: '' };
 
 function CreateTenantDialog({ open, onClose, onCreated }) {
   const [form, setForm] = useState(EMPTY_FORM);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const set = (field) => (event) => setForm({ ...form, [field]: event.target.value });
 
-  const update = (field) => (event) => setForm({ ...form, [field]: event.target.value });
-
-  async function handleSubmit(event) {
+  async function submit(event) {
     event.preventDefault();
     setError('');
     setSaving(true);
     try {
       const { data } = await api.post('/admin/tenants', form);
       setForm(EMPTY_FORM);
-      onCreated(data.tenant);
+      onCreated(data);
     } catch (err) {
-      setError(errorMessage(err, 'No se pudo crear el tenant.'));
+      setError(errorMessage(err, 'No se pudo crear la institución.'));
     } finally {
       setSaving(false);
     }
@@ -57,41 +62,45 @@ function CreateTenantDialog({ open, onClose, onCreated }) {
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
-      <form onSubmit={handleSubmit}>
-        <DialogTitle>Nueva institución</DialogTitle>
+      <form onSubmit={submit}>
+        <DialogTitle>Alta de tenant</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             {error && <Alert severity="error">{error}</Alert>}
-            <TextField label="Nombre" value={form.name} onChange={update('name')} required />
+            <TextField label="Nombre de la institución" value={form.name} onChange={set('name')} required />
             <TextField
-              label="Slug"
+              label="Identificador (slug)"
               value={form.slug}
-              onChange={update('slug')}
-              helperText="Minúsculas, números y guiones. No se puede cambiar después."
+              onChange={set('slug')}
+              helperText="Minúsculas, números y guiones; por ejemplo clinica-ejemplo. No se puede cambiar."
               required
             />
-            <TextField label="Plan" value={form.plan} onChange={update('plan')} required />
-            <Typography variant="subtitle2">Primer administrador de la institución</Typography>
-            <TextField
-              label="Email"
-              type="email"
-              value={form.admin_email}
-              onChange={update('admin_email')}
-              required
-            />
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+              <TextField label="Tipo" value="Institución" disabled fullWidth helperText="Fijo" />
+              <FormControl fullWidth>
+                <InputLabel id="plan-alta">Plan (simulado)</InputLabel>
+                <Select labelId="plan-alta" label="Plan (simulado)" value={form.plan} onChange={set('plan')}>
+                  {Object.entries(PLAN_LABELS).map(([code, label]) => (
+                    <MenuItem key={code} value={code}>
+                      {label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Stack>
+            <Typography variant="subtitle2">Primer administrador</Typography>
             <TextField
               label="Nombre completo"
               value={form.admin_full_name}
-              onChange={update('admin_full_name')}
+              onChange={set('admin_full_name')}
               required
             />
             <TextField
-              label="Contraseña inicial"
-              type="password"
-              autoComplete="new-password"
-              value={form.admin_password}
-              onChange={update('admin_password')}
-              helperText="Al menos 12 caracteres."
+              label="Correo del primer administrador"
+              type="email"
+              value={form.admin_email}
+              onChange={set('admin_email')}
+              helperText="Recibirá un enlace de un solo uso para elegir su contraseña."
               required
             />
           </Stack>
@@ -99,7 +108,7 @@ function CreateTenantDialog({ open, onClose, onCreated }) {
         <DialogActions>
           <Button onClick={onClose}>Cancelar</Button>
           <Button type="submit" variant="contained" disabled={saving}>
-            {saving ? 'Creando…' : 'Crear'}
+            {saving ? 'Creando…' : 'Crear tenant'}
           </Button>
         </DialogActions>
       </form>
@@ -107,153 +116,209 @@ function CreateTenantDialog({ open, onClose, onCreated }) {
   );
 }
 
-const CHECKS = [
-  ['app_role_without_bypass', 'La app se conecta sin superusuario ni BYPASSRLS', (r) => r.app_role_without_bypass],
-  ['rows_visible_without_context', 'Sin contexto de tenant se ven 0 filas', (r) => r.rows_visible_without_context === 0],
-  ['foreign_rows_visible_to_tenant', 'El tenant ve 0 filas de otros tenants', (r) => r.foreign_rows_visible_to_tenant === 0],
-  ['tenant_rows_visible_to_others', 'Los demás tenants ven 0 filas de este', (r) => r.tenant_rows_visible_to_others === 0],
-  ['conclusive', 'Prueba concluyente (hay filas testigo y otros tenants)', (r) => r.conclusive],
-];
-
-function IsolationDialog({ tenant, onClose }) {
-  const [report, setReport] = useState(null);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    if (!tenant) return;
-    api
-      .post(`/admin/tenants/${tenant.id}/isolation-check`)
-      .then(({ data }) => setReport(data))
-      .catch((err) => setError(errorMessage(err, 'No se pudo ejecutar el chequeo.')));
-  }, [tenant]);
-
+function CreatedResult({ result, onCheck, onClose }) {
   return (
-    <Dialog open={Boolean(tenant)} onClose={onClose} fullWidth maxWidth="sm">
-      <DialogTitle>Chequeo de aislamiento: {tenant?.slug}</DialogTitle>
-      <DialogContent>
-        {error && <Alert severity="error">{error}</Alert>}
-        {!report && !error && (
-          <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
-            <CircularProgress />
-          </Box>
-        )}
-        {report && (
-          <Stack spacing={2}>
-            <Alert severity={report.passed ? 'success' : 'error'}>
-              {report.passed ? 'Aislamiento verificado' : 'El chequeo NO pasó'}
-            </Alert>
-            <List dense>
-              {CHECKS.map(([key, label, ok]) => (
-                <ListItem key={key} disableGutters>
-                  <ListItemText primary={label} />
-                  <Chip size="small" color={ok(report) ? 'success' : 'error'} label={ok(report) ? 'OK' : 'Falla'} />
-                </ListItem>
-              ))}
-            </List>
-            <Typography variant="body2" color="text.secondary">
-              Tenants comparados: {report.other_tenants_checked}. Tablas revisadas:{' '}
-              {report.tables_checked.join(', ')}. Se ejecuta como el rol de la app en una
-              transacción de solo lectura y solo devuelve conteos.
-            </Typography>
-          </Stack>
-        )}
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose}>Cerrar</Button>
-      </DialogActions>
-    </Dialog>
+    <Alert severity="success" onClose={onClose}>
+      <Typography variant="subtitle2">Resultado del alta: {result.tenant.name}</Typography>
+      <List dense disablePadding>
+        <ListItem disableGutters>
+          <ListItemText primary="Tenant registrado" />
+        </ListItem>
+        <ListItem disableGutters>
+          <ListItemText primary="Administrador invitado" secondary={emailNotice(result.email_sent)} />
+        </ListItem>
+        <ListItem disableGutters>
+          <ListItemText primary="Bitácora registrada" />
+        </ListItem>
+      </List>
+      <Button size="small" variant="outlined" onClick={onCheck}>
+        Ver chequeo de aislamiento
+      </Button>
+    </Alert>
+  );
+}
+
+function StateChip({ tenant }) {
+  if (tenant.purge_requested_at) return <Chip size="small" color="error" label="Purga pendiente" />;
+  return tenant.is_active ? (
+    <Chip size="small" color="success" label="Activo" />
+  ) : (
+    <Chip size="small" label="Inactivo" />
   );
 }
 
 export default function Tenants() {
-  const [tenants, setTenants] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const desktop = useMediaQuery((theme) => theme.breakpoints.up('md'));
+  const navigate = useNavigate();
+  const [query, setQuery] = useState('');
+  const [active, setActive] = useState('all');
+  const [offset, setOffset] = useState(0);
+  const [page, setPage] = useState(null);
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
+  const [created, setCreated] = useState(null);
   const [checking, setChecking] = useState(null);
-
-  const load = useCallback(async () => {
-    try {
-      const { data } = await api.get('/admin/tenants');
-      setTenants(data);
-      setError('');
-    } catch (err) {
-      setError(errorMessage(err, 'No se pudieron cargar los tenants.'));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    const params = { limit: PAGE, offset };
+    if (query.trim()) params.q = query.trim();
+    if (active !== 'all') params.active = active === 'active';
+    api
+      .get('/admin/tenants', { params })
+      .then(({ data }) => {
+        setPage(data);
+        setError('');
+      })
+      .catch((err) => setError(errorMessage(err, 'No se pudieron cargar los tenants.')));
+  }, [query, active, offset, reload]);
 
-  async function toggleActive(tenant) {
-    try {
-      await api.patch(`/admin/tenants/${tenant.id}`, { is_active: !tenant.is_active });
-      await load();
-    } catch (err) {
-      setError(errorMessage(err));
-    }
-  }
+  const items = page?.items ?? [];
+  const kindLabel = (t) => (t.kind === 'b2c' ? 'Compartido' : 'Institución');
 
   return (
-    <Layout>
-      <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', mb: 2, gap: 1, flexWrap: 'wrap' }}>
+    <Stack spacing={2}>
+      <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', gap: 1, flexWrap: 'wrap' }}>
         <Typography variant="h5" component="h1">
           Tenants
         </Typography>
         <Button variant="contained" onClick={() => setCreating(true)}>
-          Nueva institución
+          Alta de tenant
         </Button>
       </Stack>
-      {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
-      {loading ? (
-        <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-          <CircularProgress />
-        </Box>
-      ) : (
-        <Stack spacing={2}>
-          {tenants.map((tenant) => (
-            <Card key={tenant.id} variant="outlined">
+      {created && (
+        <CreatedResult
+          result={created}
+          onCheck={() => setChecking(created.tenant)}
+          onClose={() => setCreated(null)}
+        />
+      )}
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+        <TextField
+          size="small"
+          placeholder="Buscar por nombre o identificador…"
+          value={query}
+          onChange={(e) => {
+            setOffset(0);
+            setQuery(e.target.value);
+          }}
+          slotProps={{ htmlInput: { 'aria-label': 'Buscar tenants' } }}
+          sx={{ maxWidth: { sm: 360 } }}
+        />
+        <ToggleButtonGroup
+          exclusive
+          size="small"
+          value={active}
+          onChange={(_, value) => {
+            if (!value) return;
+            setOffset(0);
+            setActive(value);
+          }}
+          aria-label="Estado"
+        >
+          <ToggleButton value="all">Todos</ToggleButton>
+          <ToggleButton value="active">Activos</ToggleButton>
+          <ToggleButton value="inactive">Inactivos</ToggleButton>
+        </ToggleButtonGroup>
+      </Stack>
+      {error && <Alert severity="error">{error}</Alert>}
+      {!page && !error && <CircularProgress sx={{ alignSelf: 'center' }} />}
+      {page && items.length === 0 && (
+        <Typography variant="body2" color="text.secondary">
+          Ningún tenant coincide.
+        </Typography>
+      )}
+      {page && items.length > 0 && desktop && (
+        <Card>
+          <Table aria-label="Tenants">
+            <TableHead>
+              <TableRow>
+                <TableCell>Institución</TableCell>
+                <TableCell>Identificador</TableCell>
+                <TableCell>Tipo</TableCell>
+                <TableCell>Estado</TableCell>
+                <TableCell align="right">Equipo</TableCell>
+                <TableCell align="right">Pacientes</TableCell>
+                <TableCell>Último acceso</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {items.map((tenant) => (
+                <TableRow
+                  key={tenant.id}
+                  hover
+                  sx={{ cursor: 'pointer' }}
+                  onClick={() => navigate(`/admin/tenants/${tenant.id}`)}
+                >
+                  <TableCell>
+                    <RouterLink to={`/admin/tenants/${tenant.id}`} onClick={(e) => e.stopPropagation()}>
+                      {tenant.name}
+                    </RouterLink>
+                  </TableCell>
+                  <TableCell>{tenant.slug}</TableCell>
+                  <TableCell>{kindLabel(tenant)}</TableCell>
+                  <TableCell>
+                    <StateChip tenant={tenant} />
+                  </TableCell>
+                  <TableCell align="right">{tenant.stats.staff}</TableCell>
+                  <TableCell align="right">{tenant.stats.patients}</TableCell>
+                  <TableCell>{formatDateTime(tenant.stats.last_login_at)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Card>
+      )}
+      {page &&
+        !desktop &&
+        items.map((tenant) => (
+          <Card key={tenant.id}>
+            <CardActionArea component={RouterLink} to={`/admin/tenants/${tenant.id}`}>
               <CardContent>
-                <Stack direction="row" sx={{ alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                  <Typography variant="h6" component="h2">
-                    {tenant.name}
-                  </Typography>
-                  <Chip size="small" label={tenant.kind === 'b2c' ? 'B2C compartido' : 'Institución'} />
-                  {!tenant.is_active && <Chip size="small" color="warning" label="Inactivo" />}
+                <Stack direction="row" sx={{ justifyContent: 'space-between', gap: 1 }}>
+                  <Box sx={{ minWidth: 0 }}>
+                    <Typography variant="subtitle1" component="h2">
+                      {tenant.name}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ wordBreak: 'break-all' }}>
+                      {tenant.slug} · {kindLabel(tenant)}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      {tenant.stats.staff} del equipo · {tenant.stats.patients} pacientes
+                    </Typography>
+                  </Box>
+                  <StateChip tenant={tenant} />
                 </Stack>
-                <Typography variant="body2" color="text.secondary" sx={{ wordBreak: 'break-all' }}>
-                  {tenant.slug} · plan {tenant.plan}
-                </Typography>
               </CardContent>
-              <CardActions sx={{ flexWrap: 'wrap', gap: 1, px: 2, pb: 2 }}>
-                <Button size="small" variant="outlined" onClick={() => setChecking(tenant)}>
-                  Chequeo de aislamiento
-                </Button>
-                {tenant.kind !== 'b2c' && (
-                  <FormControlLabel
-                    control={<Switch checked={tenant.is_active} onChange={() => toggleActive(tenant)} />}
-                    label="Activo"
-                  />
-                )}
-              </CardActions>
-            </Card>
-          ))}
+            </CardActionArea>
+          </Card>
+        ))}
+      {page && page.total > PAGE && (
+        <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
+          <Typography variant="body2" color="text.secondary">
+            Mostrando {offset + 1}–{Math.min(offset + PAGE, page.total)} de {page.total}
+          </Typography>
+          <Stack direction="row" spacing={1}>
+            <Button disabled={offset === 0} onClick={() => setOffset(offset - PAGE)}>
+              Anterior
+            </Button>
+            <Button disabled={offset + PAGE >= page.total} onClick={() => setOffset(offset + PAGE)}>
+              Siguiente
+            </Button>
+          </Stack>
         </Stack>
       )}
       <CreateTenantDialog
         open={creating}
         onClose={() => setCreating(false)}
-        onCreated={(tenant) => {
+        onCreated={(result) => {
           setCreating(false);
-          load();
-          setChecking(tenant);
+          setCreated(result);
+          setChecking(result.tenant);
+          setReload((n) => n + 1);
         }}
       />
-      {/* key: un diálogo nuevo por tenant, sin estado del chequeo anterior */}
       <IsolationDialog key={checking?.id ?? 'none'} tenant={checking} onClose={() => setChecking(null)} />
-    </Layout>
+    </Stack>
   );
 }

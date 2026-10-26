@@ -19,7 +19,23 @@ import Blog from './pages/patient/Blog';
 import BlogArticle from './pages/patient/BlogArticle';
 import Unsubscribe from './pages/Unsubscribe';
 import Tenants from './pages/admin/Tenants';
+import TenantDetail from './pages/admin/TenantDetail';
+import PlatformLog from './pages/admin/PlatformLog';
+import InstitutionUsers from './pages/institution/Users';
+import InstitutionLog from './pages/institution/Log';
+import AcceptInvitation from './pages/AcceptInvitation';
+import AdminShell from './components/AdminShell';
+import { BusinessIcon, LogIcon, PeopleIcon } from './components/icons';
 import theme from './theme';
+
+const PLATFORM_NAV = [
+  { label: 'Tenants', to: '/admin/tenants', icon: BusinessIcon },
+  { label: 'Auditoría de plataforma', to: '/admin/auditoria', icon: LogIcon },
+];
+const INSTITUTION_NAV = [
+  { label: 'Usuarios', to: '/institucion/usuarios', icon: PeopleIcon },
+  { label: 'Bitácora', to: '/institucion/bitacora', icon: LogIcon },
+];
 
 function App() {
   return (
@@ -32,14 +48,30 @@ function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/registro" element={<Register />} />
             <Route path="/baja" element={<Unsubscribe />} />
+            <Route path="/invitacion" element={<AcceptInvitation />} />
+            {/* Administración de plataforma (wireframe D04) */}
             <Route
-              path="/admin/tenants"
               element={
                 <ProtectedRoute roles={['platform_admin']}>
-                  <Tenants />
+                  <AdminShell title="Admin de plataforma" items={PLATFORM_NAV} />
                 </ProtectedRoute>
               }
-            />
+            >
+              <Route path="/admin/tenants" element={<Tenants />} />
+              <Route path="/admin/tenants/:id" element={<TenantDetail />} />
+              <Route path="/admin/auditoria" element={<PlatformLog />} />
+            </Route>
+            {/* Administración de la institución (tenant_admin, su tenant) */}
+            <Route
+              element={
+                <ProtectedRoute roles={['tenant_admin']}>
+                  <AdminShell title="Admin de la institución" items={INSTITUTION_NAV} />
+                </ProtectedRoute>
+              }
+            >
+              <Route path="/institucion/usuarios" element={<InstitutionUsers />} />
+              <Route path="/institucion/bitacora" element={<InstitutionLog />} />
+            </Route>
             {/* App de paciente: barra inferior en móvil, barra lateral en escritorio */}
             <Route
               element={
