@@ -1,14 +1,19 @@
-"""Envío de correos de recordatorio (CU-05) detrás de un adaptador.
+"""Envío de correos (recordatorios de CU-05 e invitaciones de ADR 0008) detrás de un adaptador.
 
-`EMAIL_BACKEND=console` (único por ahora) solo registra destinatario enmascarado y asunto, nunca
-el cuerpo. Un proveedor real (Resend, Brevo, SMTP) se agrega como otra clase con `send()`.
+- `EMAIL_BACKEND=console`: no envía; solo registra el destinatario enmascarado.
+- `EMAIL_BACKEND=resend`: API HTTP de Resend con `urllib` (sin dependencias). Requiere
+  `RESEND_API_KEY`; remitente `EMAIL_FROM` (por defecto `onboarding@resend.dev`, que sin dominio
+  verificado solo entrega al correo dueño de la cuenta de Resend).
 
 Modo discreto (por defecto): asunto y texto genéricos, sin la marca ni palabras que revelen el
 tema (mama, cáncer, autoexploración, análisis). Siempre lleva el enlace de baja.
 """
 
+import json
 import logging
 import os
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -68,11 +73,86 @@ class ConsoleEmailSender:
         logger.info("Correo (consola) para %s", mask(message.to))
 
 
+class ResendEmailSender:
+    """Proveedor real. Un error de red o de Resend se convierte en EmailError (sin detalles)."""
+
+    API_URL = "https://api.resend.com/emails"
+    TIMEOUT_SECONDS = 10
+
+    def __init__(self, api_key: str, sender: str):
+        self.api_key = api_key
+        self.sender = sender
+
+    def send(self, message: EmailMessage) -> None:
+        payload = {
+            "from": f"{message.from_name} <{self.sender}>",
+            "to": [message.to],
+            "subject": message.subject,
+            "text": message.body,
+        }
+        request = urllib.request.Request(
+            self.API_URL,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+                "User-Agent": "breastguard/1.0",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.TIMEOUT_SECONDS) as response:
+                response.read()
+        except urllib.error.HTTPError as exc:
+            # Solo el código: la respuesta de Resend puede repetir la dirección de destino
+            raise EmailError(f"Resend respondió {exc.code}") from None
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            raise EmailError(f"Resend no disponible ({type(exc).__name__})") from None
+        logger.info("Correo (resend) para %s", mask(message.to))
+
+
 def get_sender() -> EmailSender:
     backend = os.environ.get("EMAIL_BACKEND", "console")
     if backend == "console":
         return ConsoleEmailSender()
+    if backend == "resend":
+        api_key = os.environ.get("RESEND_API_KEY", "")
+        if not api_key:
+            raise EmailError("EMAIL_BACKEND=resend requiere RESEND_API_KEY")
+        return ResendEmailSender(api_key, os.environ.get("EMAIL_FROM", "onboarding@resend.dev"))
     raise EmailError(f"EMAIL_BACKEND no soportado: {backend}")
+
+
+INVITATION_SUBJECTS = {
+    "invite": "Invitación a BreastGuard",
+    "reset": "Restablece tu acceso a BreastGuard",
+}
+INVITATION_BODIES = {
+    "invite": (
+        "Hola, {name}:\n\nTe invitaron a BreastGuard ({institution}). Para activar tu cuenta, "
+        "abre este enlace y elige tu contraseña. Vence en {hours} horas y solo sirve una vez:\n\n"
+        "{url}\n\nSi no esperabas esta invitación, ignora este correo."
+    ),
+    "reset": (
+        "Hola, {name}:\n\nSe restableció tu acceso a BreastGuard ({institution}). Abre este "
+        "enlace para elegir una contraseña nueva. Vence en {hours} horas y solo sirve una vez:"
+        "\n\n{url}\n\nSi no lo pediste, avisa al administrador de tu institución."
+    ),
+}
+
+
+def compose_invitation(
+    *, to: str, name: str, institution: str, purpose: str, url: str, hours: int
+) -> EmailMessage:
+    body = INVITATION_BODIES[purpose].format(
+        name=name, institution=institution, url=url, hours=hours
+    )
+    return EmailMessage(
+        to=to,
+        subject=INVITATION_SUBJECTS[purpose],
+        body=body,
+        from_name="BreastGuard",
+    )
 
 
 def compose(*, to: str, kind: str, discreet: bool, unsubscribe_url: str) -> EmailMessage:
