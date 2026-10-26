@@ -49,10 +49,13 @@ class Scope:
 
 
 def to_out(user: User) -> StaffOut:
-    if user.hashed_password is None:
+    # Desactivar manda sobre todo: una cuenta invitada y desactivada ya no puede entrar
+    if not user.is_active:
+        status = "inactive"
+    elif user.hashed_password is None:
         status = "invited"
     else:
-        status = "active" if user.is_active else "inactive"
+        status = "active"
     return StaffOut(
         id=user.id,
         tenant_id=user.tenant_id,

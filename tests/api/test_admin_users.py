@@ -367,11 +367,13 @@ class TestInvitaciones:
 
     def test_cuenta_desactivada_no_acepta(self, client, world, outbox):
         user_id = invite(client, world["a_admin"]).json()["user"]["id"]
-        client.patch(
+        updated = client.patch(
             f"{API}/institution/users/{user_id}",
             json={"is_active": False},
             headers=auth_headers(world["a_admin"]),
         )
+        # Desactivada manda sobre invitada pendiente
+        assert updated.json()["status"] == "inactive"
         response = client.post(
             f"{API}/auth/invitations/accept",
             json={"token": outbox.last_token(), "password": DEFAULT_PASSWORD},
