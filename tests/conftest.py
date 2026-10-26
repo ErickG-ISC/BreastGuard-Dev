@@ -87,6 +87,8 @@ def _clean_tables(request):
                 "clinical.patients"
             )
         )
+        conn.execute(text("DELETE FROM control.admin_events"))
+        conn.execute(text("DELETE FROM control.invitations"))
         conn.execute(text("DELETE FROM control.reminder_notices"))
         conn.execute(text("DELETE FROM control.reminders"))
         conn.execute(text("DELETE FROM control.subscriptions"))
