@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -68,7 +69,10 @@ def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()], db: Contro
             detail="Email o contraseña incorrectos",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    return Token(access_token=create_access_token(user))
+    token = create_access_token(user)
+    user.last_login_at = datetime.now(UTC)
+    db.commit()
+    return Token(access_token=token)
 
 
 @router.get("/me", response_model=MeOut)
