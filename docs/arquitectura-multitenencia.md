@@ -22,7 +22,8 @@ No hay una base por tenant (ese modelo se reemplazó en el ADR 0002). Toda fila 
    - El JWT (HS256, 30 min) lleva `sub`, `tenant_id`, `role`, `iat` (ms) y `exp`.
    - En **cada petición** se relee el usuario y su tenant en `control` (`load_auth_context`).
    - Da 401 si el usuario o el tenant están inactivos, si cambió el rol o el tenant, o si el
-     token es anterior a `users.sessions_valid_after`.
+     token es anterior a `users.sessions_valid_after` o a `tenants.sessions_valid_after`. Ambos se
+     fijan al restablecer el acceso y al desactivar, así que reactivar no revive tokens viejos.
    - No hay caché.
 2. **Autorización por rol:** `require_role(...)`. Los endpoints clínicos son de `patient`; la
    administración es de `platform_admin` (`/admin/*`) o de `tenant_admin` (`/institution/*`).
@@ -119,7 +120,7 @@ de los errores solo se registra el tipo.
     tenant ve las suyas;
   - devuelve solo conteos.
 - **Desactivación:** la del tenant o la del usuario es efectiva en la siguiente petición (capa 1).
-  `reset-access` además fija `sessions_valid_after`.
+  Desactivar y `reset-access` fijan `sessions_valid_after`, así que un JWT anterior no revive al reactivar.
 - **Purga:** la UI la solicita (desactiva y marca); el script `purge_tenant.py --pending` con el
   rol dueño la ejecuta. El tenant b2c no se desactiva ni se purga.
 - **Recordatorios (ADR 0007):** el despachador usa la sesión de control sin contexto, así que no
