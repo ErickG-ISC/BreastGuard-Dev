@@ -167,8 +167,11 @@ def invite_staff(
     return user, sent
 
 
-def _active_admins(db: Session, tenant_id: uuid.UUID) -> int:
-    # Bloquea las filas de admins del tenant: dos cambios simultáneos no lo dejan sin admin
+def _lock_active_admins(db: Session, tenant_id: uuid.UUID) -> int:
+    """Bloquea los admins activos del tenant SIEMPRE en el mismo orden (por id).
+
+    Así dos cambios simultáneos no dejan el tenant sin admin ni se bloquean entre sí.
+    """
     ids = db.scalars(
         select(User.id)
         .where(
@@ -176,6 +179,7 @@ def _active_admins(db: Session, tenant_id: uuid.UUID) -> int:
             User.role == "tenant_admin",
             User.is_active.is_(True),
         )
+        .order_by(User.id)
         .with_for_update()
     ).all()
     return len(ids)
@@ -184,6 +188,9 @@ def _active_admins(db: Session, tenant_id: uuid.UUID) -> int:
 def update_staff(
     db: Session, scope: Scope, user_id: uuid.UUID, data: StaffUpdate, ip: str | None
 ) -> User:
+    user, _tenant = _staff_in_scope(db, scope, user_id)
+    # Primero los admins del tenant (en orden) y después la fila objetivo: orden fijo de locks
+    active_admins = _lock_active_admins(db, user.tenant_id)
     user, _tenant = _staff_in_scope(db, scope, user_id, lock=True)
     changes = data.model_dump(exclude_unset=True)
     is_self = user.id == scope.actor.user_id
@@ -198,7 +205,7 @@ def update_staff(
             or ("role" in changes and changes["role"] != "tenant_admin")
         )
     )
-    if loses_admin and _active_admins(db, user.tenant_id) <= 1:
+    if loses_admin and active_admins <= 1:
         raise InvalidOperationError("La institución debe conservar al menos un administrador")
 
     now = datetime.now(UTC)
@@ -211,6 +218,9 @@ def update_staff(
         )
     if "is_active" in changes and changes["is_active"] != user.is_active:
         user.is_active = changes["is_active"]
+        if not user.is_active:
+            # Al reactivar, los JWT de antes de la desactivación no deben revivir
+            user.sessions_valid_after = now
         _event(db, scope, "user.activate" if user.is_active else "user.deactivate", user, ip)
     user.updated_at = now
     db.commit()

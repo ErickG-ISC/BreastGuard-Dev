@@ -33,6 +33,13 @@ TenantAdmin = Annotated[AuthContext, Depends(require_role("tenant_admin"))]
 WRITE_LIMIT = Depends(rate_limit("institution_write", 60, 60))
 
 
+def _for_institution(event: AdminEventOut) -> AdminEventOut:
+    """La institución ve QUÉ hizo la plataforma, no quién ni desde qué IP."""
+    if event.actor_role in ("platform_admin", "system"):
+        return event.model_copy(update={"actor_id": None, "ip": None})
+    return event
+
+
 def _scope(auth: AuthContext) -> user_admin.Scope:
     return user_admin.Scope.for_actor(auth)
 
@@ -114,7 +121,7 @@ def list_events(
         db, only_tenant=auth.tenant_id, filters=filters, limit=limit, offset=offset
     )
     return AdminEventPage(
-        items=[AdminEventOut.model_validate(e) for e in items],
+        items=[_for_institution(AdminEventOut.model_validate(e)) for e in items],
         total=total,
         limit=limit,
         offset=offset,

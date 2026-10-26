@@ -220,6 +220,9 @@ def update_tenant(
         _event(db, actor, "tenant.update", tenant.id, "tenant", tenant.id, ip, details)
     if "is_active" in changes and changes["is_active"] != tenant.is_active:
         tenant.is_active = changes["is_active"]
+        if not tenant.is_active:
+            # Al reactivar, los JWT de antes de la desactivación no deben revivir
+            tenant.sessions_valid_after = datetime.now(UTC)
         action = "tenant.activate" if tenant.is_active else "tenant.deactivate"
         _event(db, actor, action, tenant.id, "tenant", tenant.id, ip)
     db.commit()
@@ -240,6 +243,7 @@ def request_purge(
     if tenant.purge_requested_at is not None:
         raise ConflictError("La purga ya está solicitada")
     tenant.is_active = False
+    tenant.sessions_valid_after = datetime.now(UTC)
     tenant.purge_requested_at = datetime.now(UTC)
     tenant.purge_requested_by = actor.user_id
     _event(db, actor, "tenant.purge_request", tenant.id, "tenant", tenant.id, ip)

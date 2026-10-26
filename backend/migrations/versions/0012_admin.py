@@ -55,6 +55,12 @@ def upgrade() -> None:
                 sa.Column(column, sa.DateTime(timezone=True), nullable=True),
                 schema=CONTROL,
             )
+    if not _has_column("tenants", "sessions_valid_after"):
+        op.add_column(
+            "tenants",
+            sa.Column("sessions_valid_after", sa.DateTime(timezone=True), nullable=True),
+            schema=CONTROL,
+        )
     if not _has_column("tenants", "purge_requested_at"):
         op.add_column(
             "tenants",
@@ -157,7 +163,11 @@ def upgrade() -> None:
         "FOR EACH ROW EXECUTE FUNCTION control.enforce_staff_role_change()"
     )
     grant_app("users", "UPDATE (last_login_at, sessions_valid_after, role)", schema=CONTROL)
-    grant_app("tenants", "UPDATE (purge_requested_at, purge_requested_by)", schema=CONTROL)
+    grant_app(
+        "tenants",
+        "UPDATE (purge_requested_at, purge_requested_by, sessions_valid_after)",
+        schema=CONTROL,
+    )
     grant_app("invitations", "SELECT, INSERT, UPDATE (used_at, revoked_at)", schema=CONTROL)
     # Bitácora inalterable desde la app: solo leer e insertar
     grant_app("admin_events", "SELECT, INSERT", schema=CONTROL)
@@ -183,6 +193,7 @@ def downgrade() -> None:
     for table, column in (
         ("users", "last_login_at"),
         ("users", "sessions_valid_after"),
+        ("tenants", "sessions_valid_after"),
         ("tenants", "purge_requested_at"),
         ("tenants", "purge_requested_by"),
     ):

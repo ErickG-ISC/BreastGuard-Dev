@@ -47,13 +47,18 @@ invitar y restablecer el acceso, y purgar. Restricciones:
    - Da 401 si el usuario o el tenant están inactivos, si cambió el rol o el tenant, o si el JWT
      es anterior a `users.sessions_valid_after`. El `iat` va en milisegundos, redondeado hacia
      abajo, así que un restablecimiento invalida también los tokens del mismo segundo.
+   - Desactivar fija `sessions_valid_after` del usuario (o `tenants.sessions_valid_after` del
+     tenant): al reactivar, los JWT de antes no reviven.
+   - El login solo entrega token si la contraseña verificada sigue vigente al guardar el último
+     acceso, así que no gana una carrera contra un restablecimiento.
    - Se descartó una caché: abre una ventana en la que un usuario desactivado sigue entrando, y
      con una instancia y una consulta por PK el costo es mínimo.
 6. **Bitácora de plataforma** (`control.admin_events`).
    - Registra quién, acción, tenant, objetivo, cuándo e IP.
    - `details` pasa por una lista blanca de claves: nunca correos, tokens ni contraseñas.
    - Es de solo inserción para `app_user` y no tiene FK al tenant, así que sobrevive a la purga.
-   - El `tenant_admin` solo ve su tenant; el alcance lo pone el servidor.
+   - El `tenant_admin` solo ve su tenant; el alcance lo pone el servidor. De las acciones de la
+     plataforma ve qué se hizo, pero no el id ni la IP de quien lo hizo.
    - En `clinical.audit_log` solo queda `tenant.create`, la fila testigo del chequeo de
      aislamiento.
 7. **Purga en dos pasos.**

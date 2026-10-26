@@ -134,9 +134,10 @@ def load_auth_context(db: Session, claims: TokenClaims) -> AuthContext | None:
         return None
     if tenant is not None and not tenant.is_active:
         return None
-    # Tokens emitidos antes de restablecer el acceso
-    if user.sessions_valid_after is not None and claims.issued_at < user.sessions_valid_after:
-        return None
+    # Tokens emitidos antes de restablecer el acceso o de una desactivación (aunque se reactive)
+    for valid_after in (user.sessions_valid_after, tenant.sessions_valid_after if tenant else None):
+        if valid_after is not None and claims.issued_at < valid_after:
+            return None
     return AuthContext(
         user_id=user.id,
         tenant_id=user.tenant_id,

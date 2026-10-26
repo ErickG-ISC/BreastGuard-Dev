@@ -558,3 +558,80 @@ class TestRolesSinPermiso:
             u=world["a_doctor"].id,
         )
         assert last is not None and last > datetime.now(UTC) - timedelta(minutes=1)
+
+
+class TestRevisionDeAislamiento:
+    def test_reactivar_usuario_no_revive_tokens_viejos(self, client, world):
+        old = auth_headers(world["a_doctor"])
+        a_admin = auth_headers(world["a_admin"])
+        url = f"{API}/institution/users/{world['a_doctor'].id}"
+        client.patch(url, json={"is_active": False}, headers=a_admin)
+        client.patch(url, json={"is_active": True}, headers=a_admin)
+        assert client.get(f"{API}/auth/me", headers=old).status_code == 401
+        assert login(client, "doc@a.example.com").status_code == 200
+
+    def test_reactivar_tenant_no_revive_tokens_viejos(self, client, world):
+        old = auth_headers(world["a_doctor"])
+        root = auth_headers(world["root"])
+        url = f"{API}/admin/tenants/{world['a'].id}"
+        client.patch(url, json={"is_active": False}, headers=root)
+        client.patch(url, json={"is_active": True}, headers=root)
+        assert client.get(f"{API}/auth/me", headers=old).status_code == 401
+        assert login(client, "doc@a.example.com").status_code == 200
+        assert (
+            client.get(f"{API}/auth/me", headers=auth_headers(world["b_doctor"])).status_code == 200
+        )
+
+    def test_la_institucion_no_ve_ip_ni_id_de_la_plataforma(self, client, world):
+        client.patch(
+            f"{API}/admin/tenants/{world['a'].id}",
+            json={"plan": "pro"},
+            headers=auth_headers(world["root"]),
+        )
+        invite(client, world["a_admin"])
+        items = client.get(
+            f"{API}/institution/events", headers=auth_headers(world["a_admin"])
+        ).json()["items"]
+        by_role = {e["actor_role"]: e for e in items}
+        assert by_role["platform_admin"]["ip"] is None
+        assert by_role["platform_admin"]["actor_id"] is None
+        # Lo propio de la institución sí se ve completo
+        assert by_role["tenant_admin"]["actor_id"] == str(world["a_admin"].id)
+        # La plataforma conserva el detalle completo
+        full = client.get(f"{API}/admin/events", headers=auth_headers(world["root"])).json()
+        assert any(e["actor_id"] == str(world["root"].id) and e["ip"] for e in full["items"])
+
+    def test_degradaciones_cruzadas_simultaneas_sin_error(self, client, world, user_factory):
+        second = user_factory(world["a"], role="tenant_admin", email="admin2@a.example.com")
+        results = []
+
+        def demote(actor, target):
+            results.append(
+                client.patch(
+                    f"{API}/institution/users/{target.id}",
+                    json={"role": "doctor"},
+                    headers=auth_headers(actor),
+                ).status_code
+            )
+
+        threads = [
+            threading.Thread(target=demote, args=(world["a_admin"], second)),
+            threading.Thread(target=demote, args=(second, world["a_admin"])),
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        # Uno gana; el otro ya no es admin (401 por rol cambiado) o choca con la regla (422)
+        assert 200 in results
+        assert all(code in (200, 401, 422) for code in results)
+
+    def test_chequeo_de_aislamiento_con_limite(self, client, world):
+        headers = auth_headers(world["root"])
+        codes = [
+            client.post(
+                f"{API}/admin/tenants/{world['a'].id}/isolation-check", headers=headers
+            ).status_code
+            for _ in range(11)
+        ]
+        assert codes[:10] == [200] * 10 and codes[10] == 429

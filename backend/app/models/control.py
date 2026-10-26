@@ -45,6 +45,8 @@ class Tenant(Base):
     plan: Mapped[str] = mapped_column(Text, server_default="basic")
     is_active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Desactivar el tenant invalida para siempre los JWT emitidos antes (aunque se reactive)
+    sessions_valid_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # La UI solo SOLICITA la purga; la ejecuta purge_tenant.py con el rol dueño (ADR 0008)
     purge_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     purge_requested_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))

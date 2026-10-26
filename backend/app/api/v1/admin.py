@@ -142,7 +142,11 @@ def cancel_purge(tenant_id: uuid.UUID, auth: PlatformAdmin, db: ControlDb, reque
         raise admin_errors(exc) from None
 
 
-@router.post("/tenants/{tenant_id}/isolation-check", response_model=IsolationReport)
+@router.post(
+    "/tenants/{tenant_id}/isolation-check",
+    response_model=IsolationReport,
+    dependencies=[Depends(rate_limit("admin_isolation_check", 10, 60))],
+)
 def isolation_check(tenant_id: uuid.UUID, auth: PlatformAdmin):
     try:
         return service.isolation_check(auth, tenant_id)

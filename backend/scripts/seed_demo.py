@@ -220,6 +220,14 @@ def main() -> int:
             for who, url in result.links.items():
                 print(f"  {who}: {url}")
             return 0
+        from sqlalchemy.engine import make_url
+
+        target = make_url(os.environ["DATABASE_URL"])
+        print(f"Base de destino: {target.host}:{target.port}/{target.database}")
+        typed = input(f"Esto borra TODOS los datos de {args.slug!r}. Escribe el slug: ")
+        if typed.strip() != args.slug:
+            print("Confirmación incorrecta; no se borró nada.", file=sys.stderr)
+            return 1
         engine = create_engine(os.environ["DATABASE_URL"])
         try:
             summary = clean_demo(engine, args.slug)

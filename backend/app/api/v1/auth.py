@@ -3,10 +3,12 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
+from sqlalchemy import update
 
 from backend.app.api.client_ip import client_ip
 from backend.app.api.deps import ControlDb, CurrentUser
 from backend.app.api.rate_limit import rate_limit
+from backend.app.models.control import User
 from backend.app.schemas.auth import MeOut, Token, UserCreate, UserOut
 from backend.app.schemas.tenants import InvitationAcceptIn, InvitationInfoOut, InvitationTokenIn
 from backend.app.services import invitations
@@ -74,8 +76,25 @@ def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()], db: Contro
             headers={"WWW-Authenticate": "Bearer"},
         )
     token = create_access_token(user)
-    user.last_login_at = datetime.now(UTC)
+    # Solo si la contraseña verificada sigue siendo la vigente: si un restablecimiento ganó la
+    # carrera, no se entrega token
+    updated = db.execute(
+        update(User)
+        .where(
+            User.id == user.id,
+            User.hashed_password == user.hashed_password,
+            User.is_active.is_(True),
+        )
+        .values(last_login_at=datetime.now(UTC))
+        .execution_options(synchronize_session=False)
+    ).rowcount
     db.commit()
+    if updated != 1:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Email o contraseña incorrectos",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     return Token(access_token=token)
 
 
