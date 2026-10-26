@@ -70,7 +70,7 @@ npm run preview
 
 Todos los secretos vienen de variables de entorno. Ver `.env.example` (raíz) y `frontend/.env.example`. `main.py` llama `load_dotenv()` antes de importar el resto.
 
-Variables existentes: `REMINDER_CRON_SECRET`, `EMAIL_BACKEND`, `EMAIL_FROM_NAME`, `PUBLIC_APP_URL` (CU-05), `DATABASE_URL`, `SECRET_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`, `SUPABASE_BUCKET`, `FRONTEND_ORIGIN`, `MODEL_BUCKET`, `MODEL_PREFIX`, `MODEL_DIR`, `MAX_CONCURRENT_INFERENCES`, `MAX_UPLOAD_MB` (opcional, 10 por defecto), y `VITE_API_URL` en el frontend.
+Variables existentes: `RESEND_API_KEY`, `EMAIL_FROM` (invitaciones y recordatorios con `EMAIL_BACKEND=resend`), `REMINDER_CRON_SECRET`, `EMAIL_BACKEND`, `EMAIL_FROM_NAME`, `PUBLIC_APP_URL` (CU-05), `DATABASE_URL`, `SECRET_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`, `SUPABASE_BUCKET`, `FRONTEND_ORIGIN`, `MODEL_BUCKET`, `MODEL_PREFIX`, `MODEL_DIR`, `MAX_CONCURRENT_INFERENCES`, `MAX_UPLOAD_MB` (opcional, 10 por defecto), y `VITE_API_URL` en el frontend.
 
 Variables de la multitenencia (ADR 0003):
 - `DATABASE_URL` — rol **dueño/migrador**; solo lo usan Alembic y los scripts de mantenimiento. La app toma de aquí solo host, puerto, base y sufijo del usuario (`postgres.<ref>` → `app_user.<ref>`), así que en Render puede ir sin la contraseña del dueño.
@@ -108,11 +108,23 @@ Reglas de infraestructura:
 - `services/images.py`: valida la subida (extensión y MIME JPG/PNG, tamaño `MAX_UPLOAD_MB`, que abra con Pillow) y sube a `{tenant_slug}/images/{uuid}.{ext}` con un temporal uuid que se borra en `finally`. La fila guarda `object_path`, no una URL. DICOM se rechaza hasta CU-09.
 - `services/storage.py`: bucket **privado** de Supabase Storage (cliente creado al primer uso): `upload_file`, `create_signed_url` (TTL `SIGNED_URL_TTL_SECONDS`, 300 s por defecto) y `remove_prefix` (purga). Nunca URLs públicas. Los fallos se registran solo por tipo (`StorageError`, 502). No se usa AWS/S3.
 - `services/audit.py`: `record(...)` inserta en `clinical.audit_log` con Core y sin RETURNING, en la misma transacción que la acción. `list_entries(...)` sirve a `GET /audit`.
-- `services/tenants.py` + `api/v1/admin.py` (solo `platform_admin`, solo `control`):
-  - alta atómica de tenant + primer `tenant_admin` + auditoría;
-  - alta de `tenant_admin`/`doctor` (nunca en `b2c`);
-  - activación y desactivación;
-  - `isolation-check` (READ ONLY, solo conteos).
+- Administración (ADR 0008; resumen en `docs/arquitectura-multitenencia.md`):
+  - `services/tenants.py` + `api/v1/admin.py` (solo `platform_admin`, solo `control`):
+    - tenants con filtros, paginación y estadísticas de control (personal, invitaciones, conteo de pacientes, último acceso);
+    - alta atómica con el primer `tenant_admin` **invitado** (sin contraseña);
+    - editar nombre y plan (`basic|pro|enterprise`; el tipo es fijo);
+    - desactivar y reactivar;
+    - solicitar y cancelar la purga (`confirm_slug`). La purga la ejecuta `purge_tenant.py --pending` con el rol dueño;
+    - `isolation-check` (READ ONLY, solo conteos).
+  - `services/user_admin.py`: personal (`doctor`/`tenant_admin`) con alcance (`Scope.for_actor`).
+    - El `platform_admin` gestiona cualquier tenant (`/admin/tenants/{id}/users`, `/admin/users/{id}`); el `tenant_admin`, solo el de su JWT (`api/v1/institution.py`, `/institution/*`).
+    - Operaciones: invitar, cambiar rol, activar o desactivar, reenviar invitación y restablecer acceso.
+    - Fuera de alcance da 404. Pacientes y `platform_admin` nunca aparecen.
+    - Nadie puede cambiarse el rol, desactivarse ni dejar el tenant sin admin.
+  - `services/invitations.py`: tokens de un solo uso (solo el sha256 en `control.invitations`; 48 h invitar, 2 h restablecer). Enlace `PUBLIC_APP_URL/invitacion#token=`. Públicos: `POST /auth/invitations/inspect` y `/accept`.
+  - Sesiones: el JWT lleva `iat` en ms; `load_auth_context` rechaza tokens anteriores a `users.sessions_valid_after` (restablecer acceso). `/auth/token` actualiza `last_login_at`.
+  - `services/admin_events.py`: bitácora de plataforma `control.admin_events`, solo inserción, `details` con lista blanca. `GET /admin/events` (todo) y `GET /institution/events` (su tenant).
+  - Trigger `enforce_staff_role_change`: el rol solo cambia entre `doctor` y `tenant_admin`.
 - `api/v1/analyses.py` + `services/analyses.py` (CU-02, solo pacientes):
   - `POST /analyses` (multipart, 10/min) valida y analiza. Guarda la imagen limpia en `{slug}/images/` y el heatmap en `{slug}/heatmaps/`, luego `medical_images` + `analyses`, y audita. Devuelve el reporte y las URLs firmadas.
   - `GET /analyses` (paginado) y `GET /analyses/{id}` dan el reporte con las URLs firmadas de la imagen y del heatmap.
@@ -131,14 +143,15 @@ Reglas de infraestructura:
   - Tablas `control.reminders` y `control.reminder_notices` (0011), **en control, sin RLS**: solo configuración. Toda consulta pasa por `_own_reminders` / `_own_notices` (user_id + tenant_id del JWT).
   - `services/reminder_schedule.py`: `next_run` puro (primer domingo, cada N días, cada N meses; zonas IANA con `tzdata`; huecos de horario hacia adelante, horas ambiguas a la primera).
   - Despachador `POST /internal/reminders/dispatch` (header `X-Cron-Secret` = `REMINDER_CRON_SECRET`, 32+ caracteres; sin él responde 503): `FOR UPDATE SKIP LOCKED` + `UNIQUE (reminder_id, due_at)`, un aviso aunque haya atrasos, correo fuera de la transacción. Usa la sesión de control sin contexto: nunca ve `clinical`. Lo llama `.github/workflows/reminders.yml` cada 15 min (secret `REMINDER_CRON_SECRET` y variable `API_URL` en GitHub). Local: `python -m backend.scripts.dispatch_reminders`.
-  - `services/email.py`: solo `EMAIL_BACKEND=console` (registra destinatario enmascarado y asunto). Modo discreto por defecto: sin marca ni tema. Siempre lleva enlace de baja (`PUBLIC_APP_URL/baja?token=`).
+  - `services/email.py`: `EMAIL_BACKEND=console` (solo registra el destinatario enmascarado) o `resend` (`RESEND_API_KEY`, `EMAIL_FROM`; con `urllib`, sin SDK). Modo discreto por defecto: sin marca ni tema. Siempre lleva enlace de baja (`PUBLIC_APP_URL/baja?token=`).
 - `api/v1/blog.py` + `services/blog.py` (CU-06, público, sin tenant): `GET /blog`, `GET /blog/faq` y `GET /blog/{slug}`. Artículos en `content/blog/*.md` con metadatos entre `---` (parser propio, sin PyYAML; se validan al arrancar). Sin `revisado_por` la UI muestra "Contenido educativo general · borrador", nunca "validado". "Recomendado para ti" lo arma el frontend con `GET /analyses?limit=1`. Lo pendiente de revisión médica está en `docs/contenido-pendiente-de-revision.md`.
 - `api/v1/images.py`: `POST /upload` (paciente), `GET /images` y `GET /images/{id}` (con URL firmada; ajena o inexistente da el mismo 404). Lecturas, subidas y accesos denegados (`image.denied`) auditados.
 - `api/v1/audit.py`: `GET /audit` para `tenant_admin` con filtros `from`, `to`, `actor_id`, `limit` y `offset`.
 - `api/rate_limit.py`: límites por IP y ruta: `/auth/token` 10/min, `/auth/register` 5/min, `/images/upload` 20/min. La IP sale de `api/client_ip.py`: ignora `X-Forwarded-For` salvo con `TRUSTED_PROXY_HOPS` (en Render, `1`; ver ADR 0004).
 - `backend/scripts/`:
   - `create_platform_admin.py`: como `app_user`, pide la contraseña;
-  - `purge_tenant.py`: rol dueño con BYPASSRLS, confirma escribiendo el slug, tiene `--dry-run`;
+  - `purge_tenant.py`: rol dueño con BYPASSRLS, confirma escribiendo el slug, tiene `--dry-run` y `--pending` (las purgas solicitadas en la UI); conserva `control.admin_events`;
+  - `seed_demo.py`: `--create` crea un tenant `demo-…` con personal invitado y datos clínicos sintéticos (como `app_user`); `--clean` lo purga y solo acepta slugs `demo-`;
   - `check_storage.py`: verifica que el bucket sea privado.
 
 ### Frontend (`frontend/src`)
@@ -151,7 +164,10 @@ SPA estándar: `main.jsx` monta `App.jsx` (tema, `AuthProvider` y rutas con `rea
 - `api/client.js`: axios con el Bearer del JWT, guardado en `sessionStorage`; un 401 cierra la sesión.
 - `auth/AuthContext.jsx`: login (`/auth/token`) y el usuario actual (`/auth/me`).
 - `components/ProtectedRoute.jsx` (por rol) y `components/Layout.jsx`, con el aviso de herramienta de apoyo.
-- Rutas públicas: `/`, `/login`, `/registro`. Paciente: `/paciente`, `/cuestionario`, `/analizar`, `/resultado/:id`, `/historial`, `/diario`, `/mas`, `/autoexploracion`, `/recordatorios`, `/informacion`, `/informacion/:slug`. Pública: `/baja` (confirmar baja del correo). `platform_admin`: `/admin/tenants` (crear institución, activar/desactivar y chequeo de aislamiento).
+- Rutas públicas: `/`, `/login`, `/registro`. Paciente: `/paciente`, `/cuestionario`, `/analizar`, `/resultado/:id`, `/historial`, `/diario`, `/mas`, `/autoexploracion`, `/recordatorios`, `/informacion`, `/informacion/:slug`. Públicas: `/baja` (confirmar baja del correo) e `/invitacion` (fijar contraseña con el enlace).
+- `components/AdminShell.jsx` (barra lateral D04, cajón en móvil) y `components/admin/` (`StaffManager`, `EventsLog`, `IsolationDialog`), compartidos por:
+  - `platform_admin`: `/admin/tenants`, `/admin/tenants/:id` (datos, usuarios, bitácora, chequeo, desactivar y solicitar purga) y `/admin/auditoria`;
+  - `tenant_admin`: `/institucion/usuarios` y `/institucion/bitacora`.
 
 ### Brechas conocidas (resolver en este orden)
 
@@ -167,7 +183,8 @@ Pendientes:
 3. El límite de peticiones es en memoria (una sola instancia); con varias instancias haría falta un almacén compartido.
 4. `legacy.users` conserva emails y hashes del prototipo; borrar el esquema `legacy` cuando ya no haga falta.
 5. La política de paciente deja a `doctor` y `tenant_admin` hacer UPDATE/DELETE en las tablas de la paciente (self_exams, symptom_entries) a nivel de base; hoy solo la app lo impide (endpoints solo de paciente). Decidir en la Semana 4 si se restringe por comando.
-6. Correo real de recordatorios (Resend/Brevo) pendiente: hoy solo consola + aviso en la app.
+6. Correo: Resend sin dominio verificado solo entrega al correo dueño de la cuenta.
+7. La purga desde la UI solo se solicita; la ejecuta una persona con `purge_tenant.py --pending`.
 
 ## Arquitectura objetivo: multitenencia con RLS (REGLAS INNEGOCIABLES)
 

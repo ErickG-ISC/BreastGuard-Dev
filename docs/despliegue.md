@@ -51,6 +51,28 @@ Desde tu computadora, con el `.env` apuntando a la misma base:
 4. Actions → "Recordatorios" → **Run workflow** para probarlo; luego corre solo cada 15 minutos (GitHub puede retrasarlo unos minutos).
 5. En la base de Supabase de desarrollo: `alembic -c backend/alembic.ini upgrade head` (crea 0009–0011).
 
+## 5. Correo con Resend (invitaciones y recordatorios)
+
+1. Crea una cuenta en resend.com y una **API key** (permiso "Sending access").
+2. Render → Environment: `EMAIL_BACKEND=resend`, `RESEND_API_KEY=<la llave>`. Deja
+   `EMAIL_FROM=onboarding@resend.dev` mientras no verifiques un dominio.
+3. Sin dominio verificado, Resend **solo entrega al correo con el que creaste la cuenta**. Para la
+   demo, invita a esa dirección. Para el resto del personal de prueba usa
+   `python -m backend.scripts.seed_demo --create --admin-email <tu correo>`, que imprime los
+   enlaces en tu terminal.
+4. Si un envío falla, la invitación queda creada: usa "Reenviar invitación" en la pantalla de
+   usuarios.
+
+## 6. Purgar un tenant
+
+La pantalla de administración solo **solicita** la purga: desactiva el tenant y lo marca. Para
+ejecutarla, desde tu computadora y con el `.env` del rol dueño:
+
+```
+python -m backend.scripts.purge_tenant --pending --dry-run   # qué se borraría
+python -m backend.scripts.purge_tenant --pending             # pide escribir cada slug
+```
+
 ## Pruebas en CI (GitHub Actions)
 
 `.github/workflows/ci.yml` corre dos jobs en cada push y PR:
