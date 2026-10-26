@@ -5,7 +5,7 @@ import uuid
 import pytest
 from sqlalchemy import text
 
-from backend.app.services import audit
+from backend.app.services import admin_events
 from tests.helpers import DEFAULT_PASSWORD, auth_headers
 from tests.isolation.test_rls_por_tabla import MODEL_TABLES
 
@@ -14,7 +14,6 @@ NEW_TENANT = {
     "slug": "clinica-norte",
     "admin_email": "admin@norte.example.com",
     "admin_full_name": "Admin Norte",
-    "admin_password": DEFAULT_PASSWORD,
 }
 
 
@@ -51,6 +50,7 @@ class TestCrearTenant:
             )
             == "tenant_admin"
         )
+        # Auditoría clínica: solo la fila testigo del chequeo de aislamiento
         actions = scalar(
             owner_engine,
             "SELECT array_agg(action ORDER BY action) FROM clinical.audit_log "
@@ -58,15 +58,38 @@ class TestCrearTenant:
             t=tenant_id,
             actor=root.id,
         )
-        assert actions == ["tenant.create", "user.create"]
-
-    def test_el_admin_del_tenant_puede_iniciar_sesion(self, client, root):
-        create(client, root)
-        response = client.post(
-            "/api/v1/auth/token",
-            data={"username": NEW_TENANT["admin_email"], "password": DEFAULT_PASSWORD},
+        assert actions == ["tenant.create"]
+        # Bitácora de plataforma: alta del tenant e invitación del primer admin
+        events = scalar(
+            owner_engine,
+            "SELECT array_agg(action ORDER BY action) FROM control.admin_events "
+            "WHERE tenant_id = :t AND actor_id = :actor",
+            t=tenant_id,
+            actor=root.id,
         )
-        assert response.status_code == 200
+        assert events == ["tenant.create", "user.invite"]
+        # Invitado: sin contraseña hasta que acepte
+        assert (
+            scalar(
+                owner_engine,
+                "SELECT hashed_password IS NULL FROM control.users WHERE id = :id",
+                id=body["admin_user_id"],
+            )
+            is True
+        )
+
+    def test_el_admin_entra_solo_despues_de_aceptar_la_invitacion(self, client, root, outbox):
+        response = create(client, root)
+        assert response.json()["email_sent"] is True
+        login = {"username": NEW_TENANT["admin_email"], "password": DEFAULT_PASSWORD}
+        assert client.post("/api/v1/auth/token", data=login).status_code == 401
+
+        accepted = client.post(
+            "/api/v1/auth/invitations/accept",
+            json={"token": outbox.last_token(), "password": DEFAULT_PASSWORD},
+        )
+        assert accepted.status_code == 204
+        assert client.post("/api/v1/auth/token", data=login).status_code == 200
 
     @pytest.mark.parametrize("role", ["patient", "doctor", "tenant_admin"])
     def test_solo_platform_admin(self, client, user_factory, tenant_factory, b2c_tenant, role):
@@ -96,17 +119,17 @@ class TestCrearTenant:
         )
 
     def test_fallo_a_mitad_no_deja_nada(self, client, root, owner_engine, monkeypatch):
-        # Falla en la SEGUNDA auditoría: tenant, admin y la primera fila ya se escribieron
-        real_record = audit.record
+        # Falla en el SEGUNDO evento: tenant, admin, invitación y el primer evento ya se escribieron
+        real_record = admin_events.record
         calls = []
 
         def fail_on_second(*args, **kwargs):
             calls.append(kwargs["action"])
             if len(calls) == 2:
-                raise RuntimeError("fallo simulado en la auditoría")
+                raise RuntimeError("fallo simulado en la bitácora")
             real_record(*args, **kwargs)
 
-        monkeypatch.setattr(audit, "record", fail_on_second)
+        monkeypatch.setattr(admin_events, "record", fail_on_second)
         with pytest.raises(RuntimeError, match="fallo simulado"):
             create(client, root)
 
@@ -126,8 +149,10 @@ class TestCrearTenant:
             )
             == 0
         )
-        assert calls == ["tenant.create", "user.create"]
+        assert calls == ["tenant.create", "user.invite"]
         assert scalar(owner_engine, "SELECT count(*) FROM clinical.audit_log") == 0
+        assert scalar(owner_engine, "SELECT count(*) FROM control.admin_events") == 0
+        assert scalar(owner_engine, "SELECT count(*) FROM control.invitations") == 0
 
     def test_carrera_de_email_409_sin_dejar_nada(self, client, root, owner_engine, monkeypatch):
         # Simula que otro proceso registró el email entre la verificación y el INSERT
@@ -150,8 +175,9 @@ class TestCrearTenant:
     def test_slug_reservado_422(self, client, root, slug):
         assert create(client, root, slug=slug).status_code == 422
 
-    def test_contrasena_corta_para_personal_422(self, client, root):
-        assert create(client, root, admin_password="corta-11ch").status_code == 422
+    def test_no_acepta_contrasena_en_el_alta(self, client, root):
+        # Sin contraseñas enviadas ni mostradas: el primer admin se invita
+        assert create(client, root, admin_password=DEFAULT_PASSWORD).status_code == 422
 
     @pytest.mark.parametrize(
         "overrides",
@@ -247,21 +273,17 @@ class TestUsuariosYActivacion:
         tenant = tenant_factory("clinica-a")
         response = client.post(
             f"/api/v1/admin/tenants/{tenant.id}/users",
-            json={
-                "email": "doc@a.example.com",
-                "full_name": "Doc",
-                "password": DEFAULT_PASSWORD,
-                "role": "doctor",
-            },
+            json={"email": "doc@a.example.com", "full_name": "Doc", "role": "doctor"},
             headers=auth_headers(root),
         )
         assert response.status_code == 201
-        assert response.json()["tenant_id"] == str(tenant.id)
+        assert response.json()["user"]["tenant_id"] == str(tenant.id)
+        assert response.json()["user"]["status"] == "invited"
         assert (
             scalar(
                 owner_engine,
-                "SELECT count(*) FROM clinical.audit_log "
-                "WHERE tenant_id = :t AND action = 'user.create'",
+                "SELECT count(*) FROM control.admin_events "
+                "WHERE tenant_id = :t AND action = 'user.invite'",
                 t=tenant.id,
             )
             == 1
@@ -272,7 +294,7 @@ class TestUsuariosYActivacion:
         tenant = tenant_factory("clinica-a")
         response = client.post(
             f"/api/v1/admin/tenants/{tenant.id}/users",
-            json={"email": "x@a.com", "full_name": "X", "password": DEFAULT_PASSWORD, "role": role},
+            json={"email": "x@a.com", "full_name": "X", "role": role},
             headers=auth_headers(root),
         )
         assert response.status_code == 422
@@ -280,12 +302,7 @@ class TestUsuariosYActivacion:
     def test_b2c_no_admite_personal(self, client, root, b2c_tenant):
         response = client.post(
             f"/api/v1/admin/tenants/{b2c_tenant.id}/users",
-            json={
-                "email": "doc@b2c.com",
-                "full_name": "Doc",
-                "password": DEFAULT_PASSWORD,
-                "role": "doctor",
-            },
+            json={"email": "doc@b2c.com", "full_name": "Doc", "role": "doctor"},
             headers=auth_headers(root),
         )
         assert response.status_code == 422
@@ -336,7 +353,7 @@ class TestUsuariosYActivacion:
         )
         assert response.status_code == 422
 
-    def test_desactivacion_queda_auditada_en_el_tenant(
+    def test_desactivacion_queda_en_la_bitacora_de_plataforma(
         self, client, root, tenant_factory, owner_engine
     ):
         tenant = tenant_factory("clinica-a")
@@ -347,7 +364,7 @@ class TestUsuariosYActivacion:
         )
         count = scalar(
             owner_engine,
-            "SELECT count(*) FROM clinical.audit_log WHERE tenant_id = :t "
+            "SELECT count(*) FROM control.admin_events WHERE tenant_id = :t "
             "AND action = 'tenant.deactivate' AND actor_id = :a",
             t=tenant.id,
             a=root.id,
@@ -358,7 +375,7 @@ class TestUsuariosYActivacion:
         tenant_factory("clinica-a")
         response = client.get("/api/v1/admin/tenants", headers=auth_headers(root))
         assert response.status_code == 200
-        assert {t["slug"] for t in response.json()} >= {"b2c", "clinica-a"}
+        assert {t["slug"] for t in response.json()["items"]} >= {"b2c", "clinica-a"}
 
 
 class TestAccesoCruzadoDeAdministracion:

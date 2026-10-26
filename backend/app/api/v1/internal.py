@@ -11,7 +11,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 
-from backend.app.api.deps import ControlDb
+from backend.app.api.deps import ControlDb, get_email_sender
 from backend.app.api.rate_limit import rate_limit
 from backend.app.schemas.reminders import DispatchOut
 from backend.app.services import email as email_service
@@ -32,11 +32,6 @@ def require_cron_secret(x_cron_secret: Annotated[str | None, Header()] = None) -
         x_cron_secret.encode("utf-8"), expected.encode("utf-8")
     ):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No autorizado")
-
-
-def get_email_sender() -> email_service.EmailSender:
-    """Punto de override en pruebas."""
-    return email_service.get_sender()
 
 
 @router.post(

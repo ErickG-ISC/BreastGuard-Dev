@@ -26,6 +26,9 @@ PUBLIC_ROUTES = {
     ("GET", "/api/v1/self-exam/guide"),
     # Baja de recordatorios desde el correo: token firmado propio (tests/api/test_reminders.py)
     ("POST", "/api/v1/reminders/unsubscribe"),
+    # Invitaciones: token de un solo uso propio (tests/api/test_admin_users.py)
+    ("POST", "/api/v1/auth/invitations/inspect"),
+    ("POST", "/api/v1/auth/invitations/accept"),
     # CU-06: contenido educativo general, sin datos de pacientes
     ("GET", "/api/v1/blog"),
     ("GET", "/api/v1/blog/faq"),

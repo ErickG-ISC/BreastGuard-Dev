@@ -202,3 +202,33 @@ def user_factory(owner_engine):
         return insert_user(owner_engine, tenant, role=role, email=email, active=active)
 
     return create
+
+
+class Outbox:
+    """Correos "enviados" durante una prueba (sustituye al adaptador real)."""
+
+    def __init__(self):
+        self.messages = []
+        self.fail = False
+
+    def send(self, message):
+        if self.fail:
+            from backend.app.services.email import EmailError
+
+            raise EmailError("proveedor caído")
+        self.messages.append(message)
+
+    def last_token(self) -> str:
+        """Token de la última invitación (va en el fragmento #token= del enlace)."""
+        body = self.messages[-1].body
+        return body.split("#token=", 1)[1].split()[0]
+
+
+@pytest.fixture
+def outbox():
+    from backend.app.api.deps import get_email_sender
+
+    box = Outbox()
+    app.dependency_overrides[get_email_sender] = lambda: box
+    yield box
+    app.dependency_overrides.pop(get_email_sender, None)

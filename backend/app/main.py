@@ -17,6 +17,7 @@ from backend.app.api.v1 import (
     blog,
     health,
     images,
+    institution,
     internal,
     onboarding,
     reminders,
@@ -82,6 +83,7 @@ app.include_router(health.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1/auth")
 app.include_router(images.router, prefix="/api/v1/images")
 app.include_router(admin.router, prefix="/api/v1/admin")
+app.include_router(institution.router, prefix="/api/v1/institution")
 app.include_router(audit.router, prefix="/api/v1/audit")
 app.include_router(onboarding.router, prefix="/api/v1")
 app.include_router(analyses.router, prefix="/api/v1/analyses")

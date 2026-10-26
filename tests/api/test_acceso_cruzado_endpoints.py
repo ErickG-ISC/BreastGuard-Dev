@@ -20,14 +20,8 @@ NEW_TENANT = {
     "slug": "clinica-sur",
     "admin_email": "admin@sur.example.com",
     "admin_full_name": "Admin Sur",
-    "admin_password": DEFAULT_PASSWORD,
 }
-NEW_STAFF = {
-    "email": "nuevo@example.com",
-    "full_name": "Nuevo",
-    "password": DEFAULT_PASSWORD,
-    "role": "doctor",
-}
+NEW_STAFF = {"email": "nuevo@example.com", "full_name": "Nuevo", "role": "doctor"}
 SOME_ID = uuid.uuid4()
 
 # nombre -> (método, ruta, argumentos de request.). Cubre TODOS los endpoints autenticados.
@@ -51,6 +45,32 @@ PROTECTED = {
     "admin_create_user": ("POST", f"{API}/admin/tenants/{SOME_ID}/users", {"json": NEW_STAFF}),
     "admin_update_user": ("PATCH", f"{API}/admin/users/{SOME_ID}", {"json": {"is_active": False}}),
     "admin_isolation_check": ("POST", f"{API}/admin/tenants/{SOME_ID}/isolation-check", {}),
+    "admin_get_tenant": ("GET", f"{API}/admin/tenants/{SOME_ID}", {}),
+    "admin_purge_request": (
+        "POST",
+        f"{API}/admin/tenants/{SOME_ID}/purge-request",
+        {"json": {"confirm_slug": "x"}},
+    ),
+    "admin_purge_cancel": ("DELETE", f"{API}/admin/tenants/{SOME_ID}/purge-request", {}),
+    "admin_list_users": ("GET", f"{API}/admin/tenants/{SOME_ID}/users", {}),
+    "admin_resend_invitation": ("POST", f"{API}/admin/users/{SOME_ID}/invitation", {}),
+    "admin_reset_access": ("POST", f"{API}/admin/users/{SOME_ID}/reset-access", {}),
+    "admin_events": ("GET", f"{API}/admin/events", {}),
+    # Administración de la institución (solo tenant_admin)
+    "institution_list_users": ("GET", f"{API}/institution/users", {}),
+    "institution_invite": ("POST", f"{API}/institution/users", {"json": NEW_STAFF}),
+    "institution_update_user": (
+        "PATCH",
+        f"{API}/institution/users/{SOME_ID}",
+        {"json": {"is_active": False}},
+    ),
+    "institution_resend_invitation": (
+        "POST",
+        f"{API}/institution/users/{SOME_ID}/invitation",
+        {},
+    ),
+    "institution_reset_access": ("POST", f"{API}/institution/users/{SOME_ID}/reset-access", {}),
+    "institution_events": ("GET", f"{API}/institution/events", {}),
     # CU-01 (solo pacientes)
     "subscription_get": ("GET", f"{API}/subscription/me", {}),
     "subscription_put": ("PUT", f"{API}/subscription/me", {"json": {"plan_code": "plus"}}),

@@ -1,100 +1,256 @@
-"""Administración de plataforma (CU-12). Solo platform_admin; solo esquema control."""
+"""Administración de plataforma (CU-12, ADR 0008). Solo platform_admin; solo esquema control.
+
+El platform_admin gestiona tenants y su personal, pero no ve datos clínicos: las estadísticas
+son de control. Cada cambio queda en la bitácora de plataforma (control.admin_events).
+"""
 
 import uuid
+from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from backend.app.api.client_ip import client_ip
-from backend.app.api.deps import ControlDb, require_role
+from backend.app.api.deps import ControlDb, Sender, require_role
+from backend.app.api.rate_limit import rate_limit
 from backend.app.schemas.tenants import (
-    ActiveUpdate,
-    AdminUserOut,
+    AdminEventOut,
+    AdminEventPage,
+    InvitationSent,
     IsolationReport,
+    PurgeRequest,
+    StaffInvite,
+    StaffInvited,
+    StaffList,
+    StaffOut,
+    StaffUpdate,
     TenantCreate,
     TenantCreated,
     TenantOut,
-    TenantUserCreate,
+    TenantPage,
+    TenantSummary,
+    TenantUpdate,
 )
+from backend.app.services import admin_events, invitations, user_admin
 from backend.app.services import tenants as service
 from backend.app.services.auth import AuthContext
 
 router = APIRouter()
 
 PlatformAdmin = Annotated[AuthContext, Depends(require_role("platform_admin"))]
+WRITE_LIMIT = Depends(rate_limit("admin_write", 60, 60))
 
 
-def _client_ip(request: Request) -> str | None:
-    return client_ip(request)
+def _summary(item: service.TenantWithStats) -> TenantSummary:
+    return TenantSummary(**TenantOut.model_validate(item.tenant).model_dump(), stats=item.stats)
 
 
-def _not_found() -> HTTPException:
-    return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No encontrado")
+def admin_errors(exc: Exception) -> HTTPException:
+    """Traduce errores de servicio; 404 uniforme para lo inexistente o fuera de alcance."""
+    if isinstance(exc, service.NotFoundError):
+        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No encontrado")
+    if isinstance(exc, service.ConflictError):
+        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    if isinstance(exc, service.InvalidOperationError):
+        return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc))
+    raise exc
 
 
-@router.post("/tenants", response_model=TenantCreated, status_code=status.HTTP_201_CREATED)
-def create_tenant(data: TenantCreate, auth: PlatformAdmin, db: ControlDb, request: Request):
-    try:
-        tenant, admin = service.create_tenant(db, auth, data, _client_ip(request))
-    except service.ConflictError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from None
-    return TenantCreated(tenant=TenantOut.model_validate(tenant), admin_user_id=admin.id)
+ADMIN_ERRORS = (service.NotFoundError, service.ConflictError, service.InvalidOperationError)
 
 
-@router.get("/tenants", response_model=list[TenantOut])
-def list_tenants(auth: PlatformAdmin, db: ControlDb):
-    return service.list_tenants(db)
+# --- Tenants -------------------------------------------------------------------------------
 
 
-@router.patch("/tenants/{tenant_id}", response_model=TenantOut)
-def update_tenant(
-    tenant_id: uuid.UUID, data: ActiveUpdate, auth: PlatformAdmin, db: ControlDb, request: Request
+@router.get("/tenants", response_model=TenantPage)
+def list_tenants(
+    auth: PlatformAdmin,
+    db: ControlDb,
+    q: Annotated[str | None, Query(max_length=100)] = None,
+    active: bool | None = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ):
-    try:
-        return service.set_tenant_active(db, auth, tenant_id, data.is_active, _client_ip(request))
-    except service.NotFoundError:
-        raise _not_found() from None
-    except service.InvalidOperationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
-        ) from None
+    items, total = service.list_tenants(db, q=q, active=active, limit=limit, offset=offset)
+    return TenantPage(items=[_summary(i) for i in items], total=total, limit=limit, offset=offset)
 
 
 @router.post(
-    "/tenants/{tenant_id}/users", response_model=AdminUserOut, status_code=status.HTTP_201_CREATED
+    "/tenants",
+    response_model=TenantCreated,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[WRITE_LIMIT],
 )
-def create_tenant_user(
-    tenant_id: uuid.UUID,
-    data: TenantUserCreate,
-    auth: PlatformAdmin,
-    db: ControlDb,
-    request: Request,
+def create_tenant(
+    data: TenantCreate, auth: PlatformAdmin, db: ControlDb, sender: Sender, request: Request
 ):
     try:
-        return service.create_tenant_user(db, auth, tenant_id, data, _client_ip(request))
-    except service.NotFoundError:
-        raise _not_found() from None
-    except service.ConflictError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from None
-    except service.InvalidOperationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
-        ) from None
+        tenant, admin, token = service.create_tenant(db, auth, data, client_ip(request))
+    except ADMIN_ERRORS as exc:
+        raise admin_errors(exc) from None
+    sent = invitations.send(
+        sender, user=admin, institution=tenant.name, purpose="invite", token=token
+    )
+    return TenantCreated(
+        tenant=TenantOut.model_validate(tenant), admin_user_id=admin.id, email_sent=sent
+    )
 
 
-@router.patch("/users/{user_id}", response_model=AdminUserOut)
-def update_user(
-    user_id: uuid.UUID, data: ActiveUpdate, auth: PlatformAdmin, db: ControlDb, request: Request
+@router.get("/tenants/{tenant_id}", response_model=TenantSummary)
+def get_tenant(tenant_id: uuid.UUID, auth: PlatformAdmin, db: ControlDb):
+    try:
+        return _summary(service.get_tenant(db, tenant_id))
+    except ADMIN_ERRORS as exc:
+        raise admin_errors(exc) from None
+
+
+@router.patch("/tenants/{tenant_id}", response_model=TenantSummary, dependencies=[WRITE_LIMIT])
+def update_tenant(
+    tenant_id: uuid.UUID, data: TenantUpdate, auth: PlatformAdmin, db: ControlDb, request: Request
 ):
     try:
-        return service.set_user_active(db, auth, user_id, data.is_active, _client_ip(request))
-    except service.NotFoundError:
-        raise _not_found() from None
+        return _summary(service.update_tenant(db, auth, tenant_id, data, client_ip(request)))
+    except ADMIN_ERRORS as exc:
+        raise admin_errors(exc) from None
+
+
+@router.post(
+    "/tenants/{tenant_id}/purge-request",
+    response_model=TenantSummary,
+    dependencies=[WRITE_LIMIT],
+)
+def request_purge(
+    tenant_id: uuid.UUID, data: PurgeRequest, auth: PlatformAdmin, db: ControlDb, request: Request
+):
+    """Solo SOLICITA la purga (desactiva y marca); la ejecuta purge_tenant.py --pending."""
+    try:
+        item = service.request_purge(db, auth, tenant_id, data.confirm_slug, client_ip(request))
+    except ADMIN_ERRORS as exc:
+        raise admin_errors(exc) from None
+    return _summary(item)
+
+
+@router.delete(
+    "/tenants/{tenant_id}/purge-request",
+    response_model=TenantSummary,
+    dependencies=[WRITE_LIMIT],
+)
+def cancel_purge(tenant_id: uuid.UUID, auth: PlatformAdmin, db: ControlDb, request: Request):
+    try:
+        return _summary(service.cancel_purge(db, auth, tenant_id, client_ip(request)))
+    except ADMIN_ERRORS as exc:
+        raise admin_errors(exc) from None
 
 
 @router.post("/tenants/{tenant_id}/isolation-check", response_model=IsolationReport)
 def isolation_check(tenant_id: uuid.UUID, auth: PlatformAdmin):
     try:
         return service.isolation_check(auth, tenant_id)
-    except service.NotFoundError:
-        raise _not_found() from None
+    except ADMIN_ERRORS as exc:
+        raise admin_errors(exc) from None
+
+
+# --- Personal de cualquier tenant --------------------------------------------------------
+
+
+@router.get("/tenants/{tenant_id}/users", response_model=StaffList)
+def list_staff(tenant_id: uuid.UUID, auth: PlatformAdmin, db: ControlDb):
+    try:
+        staff, patients = user_admin.list_staff(db, user_admin.Scope.for_actor(auth), tenant_id)
+    except ADMIN_ERRORS as exc:
+        raise admin_errors(exc) from None
+    return StaffList(items=[user_admin.to_out(u) for u in staff], patients=patients)
+
+
+@router.post(
+    "/tenants/{tenant_id}/users",
+    response_model=StaffInvited,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[WRITE_LIMIT],
+)
+def invite_staff(
+    tenant_id: uuid.UUID,
+    data: StaffInvite,
+    auth: PlatformAdmin,
+    db: ControlDb,
+    sender: Sender,
+    request: Request,
+):
+    try:
+        user, sent = user_admin.invite_staff(
+            db, user_admin.Scope.for_actor(auth), tenant_id, data, sender, client_ip(request)
+        )
+    except ADMIN_ERRORS as exc:
+        raise admin_errors(exc) from None
+    return StaffInvited(user=user_admin.to_out(user), email_sent=sent)
+
+
+@router.patch("/users/{user_id}", response_model=StaffOut, dependencies=[WRITE_LIMIT])
+def update_staff(
+    user_id: uuid.UUID, data: StaffUpdate, auth: PlatformAdmin, db: ControlDb, request: Request
+):
+    try:
+        user = user_admin.update_staff(
+            db, user_admin.Scope.for_actor(auth), user_id, data, client_ip(request)
+        )
+    except ADMIN_ERRORS as exc:
+        raise admin_errors(exc) from None
+    return user_admin.to_out(user)
+
+
+@router.post(
+    "/users/{user_id}/invitation", response_model=InvitationSent, dependencies=[WRITE_LIMIT]
+)
+def resend_invitation(
+    user_id: uuid.UUID, auth: PlatformAdmin, db: ControlDb, sender: Sender, request: Request
+):
+    try:
+        sent = user_admin.resend_invitation(
+            db, user_admin.Scope.for_actor(auth), user_id, sender, client_ip(request)
+        )
+    except ADMIN_ERRORS as exc:
+        raise admin_errors(exc) from None
+    return InvitationSent(email_sent=sent)
+
+
+@router.post(
+    "/users/{user_id}/reset-access", response_model=InvitationSent, dependencies=[WRITE_LIMIT]
+)
+def reset_access(
+    user_id: uuid.UUID, auth: PlatformAdmin, db: ControlDb, sender: Sender, request: Request
+):
+    try:
+        sent = user_admin.reset_access(
+            db, user_admin.Scope.for_actor(auth), user_id, sender, client_ip(request)
+        )
+    except ADMIN_ERRORS as exc:
+        raise admin_errors(exc) from None
+    return InvitationSent(email_sent=sent)
+
+
+# --- Bitácora de plataforma ---------------------------------------------------------------
+
+
+@router.get("/events", response_model=AdminEventPage)
+def list_events(
+    auth: PlatformAdmin,
+    db: ControlDb,
+    tenant_id: uuid.UUID | None = None,
+    action: Annotated[str | None, Query(max_length=64)] = None,
+    date_from: Annotated[datetime | None, Query(alias="from")] = None,
+    date_to: Annotated[datetime | None, Query(alias="to")] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+):
+    filters = admin_events.EventFilters(
+        tenant_id=tenant_id, action=action, date_from=date_from, date_to=date_to
+    )
+    items, total = admin_events.list_events(
+        db, only_tenant=None, filters=filters, limit=limit, offset=offset
+    )
+    return AdminEventPage(
+        items=[AdminEventOut.model_validate(e) for e in items],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )

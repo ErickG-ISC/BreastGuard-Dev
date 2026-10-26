@@ -17,7 +17,7 @@ load_dotenv()
 from pydantic import ValidationError  # noqa: E402
 
 from backend.app.db import new_session  # noqa: E402
-from backend.app.schemas.tenants import TenantUserCreate  # noqa: E402
+from backend.app.schemas.tenants import PlatformAdminCreate  # noqa: E402
 from backend.app.services.tenants import ConflictError, create_platform_admin  # noqa: E402
 
 
@@ -29,10 +29,8 @@ def main() -> int:
 
     password = getpass.getpass("Contraseña: ")
     try:
-        # Mismas reglas que el personal creado por API (email válido, 12+ caracteres, bcrypt)
-        TenantUserCreate(
-            email=args.email, full_name=args.name, password=password, role="tenant_admin"
-        )
+        # Email válido, 12+ caracteres y límite de bcrypt
+        PlatformAdminCreate(email=args.email, full_name=args.name, password=password)
     except ValidationError as exc:
         print(f"Datos no válidos: {exc.errors()[0]['msg']}", file=sys.stderr)
         return 1
