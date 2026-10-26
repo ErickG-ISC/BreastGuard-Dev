@@ -1,4 +1,5 @@
 import ipaddress
+import math
 import os
 import uuid
 from dataclasses import dataclass
@@ -87,8 +88,9 @@ def create_access_token(user: User, expires_delta: timedelta | None = None) -> s
         "sub": str(user.id),
         "tenant_id": str(user.tenant_id) if user.tenant_id else None,
         "role": user.role,
-        # iat permite invalidar sesiones anteriores a un restablecimiento de acceso
-        "iat": int(now.timestamp()),
+        # iat (en milisegundos, redondeado hacia abajo) permite invalidar las sesiones emitidas
+        # antes de un restablecimiento de acceso, aunque ocurran en el mismo segundo
+        "iat": math.floor(now.timestamp() * 1000) / 1000,
         "exp": expire,
     }
     return jwt.encode(claims, SECRET_KEY, algorithm=ALGORITHM)
@@ -109,7 +111,7 @@ def decode_access_token(token: str) -> TokenClaims:
             user_id=uuid.UUID(payload["sub"]),
             tenant_id=uuid.UUID(raw_tenant) if raw_tenant is not None else None,
             role=role,
-            issued_at=datetime.fromtimestamp(int(payload["iat"]), UTC),
+            issued_at=datetime.fromtimestamp(float(payload["iat"]), UTC),
         )
     except (JWTError, KeyError, TypeError, ValueError, AttributeError):
         raise InvalidTokenError from None
@@ -132,10 +134,8 @@ def load_auth_context(db: Session, claims: TokenClaims) -> AuthContext | None:
         return None
     if tenant is not None and not tenant.is_active:
         return None
-    # Tokens emitidos antes de restablecer el acceso (iat va en segundos enteros)
-    if user.sessions_valid_after is not None and claims.issued_at < (
-        user.sessions_valid_after.replace(microsecond=0)
-    ):
+    # Tokens emitidos antes de restablecer el acceso
+    if user.sessions_valid_after is not None and claims.issued_at < user.sessions_valid_after:
         return None
     return AuthContext(
         user_id=user.id,
