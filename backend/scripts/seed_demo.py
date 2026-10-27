@@ -1,7 +1,8 @@
 """Crea o limpia un tenant de DEMOSTRACIÓN con personal invitado y datos clínicos SINTÉTICOS.
 
 Uso, desde la raíz del repo (contra la base de DESARROLLO):
-    python -m backend.scripts.seed_demo --create [--slug demo-clinica] [--admin-email tu@correo]
+    python -m backend.scripts.seed_demo --create [--slug demo-clinica] [--name "Clínica X"]
+                                            [--admin-email tu@correo]
     python -m backend.scripts.seed_demo --clean  [--slug demo-clinica]
 
 --create se conecta como app_user (nunca como dueño):
@@ -90,12 +91,16 @@ def _event(
     )
 
 
-def create_demo(slug: str = "demo-clinica", admin_email: str | None = None) -> DemoResult:
+def create_demo(
+    slug: str = "demo-clinica",
+    admin_email: str | None = None,
+    name: str = "Clínica de Demostración",
+) -> DemoResult:
     _check_slug(slug)
     with new_session() as db:
         if db.scalars(select(Tenant.id).where(Tenant.slug == slug)).first():
             raise DemoError(f"El tenant {slug!r} ya existe; límpialo antes con --clean")
-        tenant = Tenant(slug=slug, name="Clínica de Demostración", kind="institucion", plan="pro")
+        tenant = Tenant(slug=slug, name=name, kind="institucion", plan="pro")
         db.add(tenant)
         db.flush()
         _event(db, "tenant.create", tenant.id, "tenant", tenant.id, {"plan": "pro"})
@@ -209,12 +214,13 @@ def main() -> int:
     action.add_argument("--create", action="store_true")
     action.add_argument("--clean", action="store_true")
     parser.add_argument("--slug", default="demo-clinica")
+    parser.add_argument("--name", default="Clínica de Demostración", help="Nombre visible")
     parser.add_argument("--admin-email", help="Correo del tenant_admin (p. ej. el tuyo)")
     args = parser.parse_args()
 
     try:
         if args.create:
-            result = create_demo(args.slug, args.admin_email)
+            result = create_demo(args.slug, args.admin_email, args.name)
             print(f"Tenant de demostración creado: {args.slug} ({result.tenant_id})")
             print("Enlaces de invitación (de un solo uso; no los compartas por canales públicos):")
             for who, url in result.links.items():
