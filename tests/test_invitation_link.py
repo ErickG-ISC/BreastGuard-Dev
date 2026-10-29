@@ -23,8 +23,9 @@ def invited(owner_engine, tenant, email, role="doctor"):
 def test_genera_enlace_que_sirve_y_revoca_el_anterior(client, owner_engine, tenant_factory):
     tenant = tenant_factory("clinica-a")
     invited(owner_engine, tenant, "doc@a.example.com")
-    first = issue_link("DOC@a.example.com")
-    second = issue_link("doc@a.example.com")
+    first, purpose = issue_link("DOC@a.example.com")
+    second, _ = issue_link("doc@a.example.com")
+    assert purpose == "invite"
     old, new = (url.split("#token=")[1] for url in (first, second))
 
     stale = client.post(
@@ -56,5 +57,43 @@ def test_no_sirve_para_cuentas_activas_pacientes_ni_admins(
 def test_no_sirve_si_la_institucion_esta_desactivada(owner_engine, tenant_factory):
     tenant = tenant_factory("clinica-a", active=False)
     invited(owner_engine, tenant, "doc@a.example.com")
+    with pytest.raises(InvitationLinkError, match="desactivad"):
+        issue_link("doc@a.example.com")
+
+
+def test_cuenta_restablecida_recibe_enlace_de_restablecimiento(owner_engine, tenant_factory):
+    tenant = tenant_factory("clinica-a")
+    user_id = invited(owner_engine, tenant, "doc@a.example.com")
+    with owner_engine.begin() as conn:
+        conn.execute(
+            text("UPDATE control.users SET last_login_at = now() WHERE id = :u"), {"u": user_id}
+        )
+    _, purpose = issue_link("doc@a.example.com")
+    assert purpose == "reset"
+    with owner_engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT i.purpose, i.expires_at - i.created_at < interval '3 hours', e.details "
+                "FROM control.invitations i, control.admin_events e WHERE i.user_id = :u"
+            ),
+            {"u": user_id},
+        ).one()
+    assert row[0] == "reset" and row[1] is True and row[2] == {"purpose": "reset"}
+
+
+def test_tenant_admin_invitado_si_recibe_enlace(owner_engine, tenant_factory):
+    tenant = tenant_factory("clinica-a")
+    invited(owner_engine, tenant, "admin@a.example.com", role="tenant_admin")
+    url, purpose = issue_link("admin@a.example.com")
+    assert "#token=" in url and purpose == "invite"
+
+
+def test_cuenta_desactivada_no_recibe_enlace(owner_engine, tenant_factory):
+    tenant = tenant_factory("clinica-a")
+    user_id = invited(owner_engine, tenant, "doc@a.example.com")
+    with owner_engine.begin() as conn:
+        conn.execute(
+            text("UPDATE control.users SET is_active = false WHERE id = :u"), {"u": user_id}
+        )
     with pytest.raises(InvitationLinkError, match="desactivad"):
         issue_link("doc@a.example.com")

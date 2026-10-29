@@ -30,7 +30,8 @@ class InvitationLinkError(Exception):
     pass
 
 
-def issue_link(email: str) -> str:
+def issue_link(email: str) -> tuple[str, str]:
+    """(enlace, propósito). Una cuenta que ya entró antes recibe un restablecimiento (2 h)."""
     with new_session() as db:
         row = db.execute(
             select(User, Tenant)
@@ -48,7 +49,9 @@ def issue_link(email: str) -> str:
             )
         if not user.is_active or not tenant.is_active:
             raise InvitationLinkError("La cuenta o su institución están desactivadas")
-        token = invitations.issue(db, user, "invite", None)
+        # Ya tuvo acceso: es un restablecimiento (vence en 2 h), no una invitación (48 h)
+        purpose = "reset" if user.last_login_at is not None else "invite"
+        token = invitations.issue(db, user, purpose, None)
         admin_events.record(
             db,
             actor_id=None,
@@ -58,9 +61,10 @@ def issue_link(email: str) -> str:
             target_type="user",
             target_id=user.id,
             ip=None,
+            details={"purpose": purpose},
         )
         db.commit()
-    return invitations.invitation_url(token)
+    return invitations.invitation_url(token), purpose
 
 
 def main() -> int:
@@ -68,12 +72,20 @@ def main() -> int:
     parser.add_argument("--email", required=True)
     args = parser.parse_args()
     try:
-        url = issue_link(args.email)
+        url, purpose = issue_link(args.email)
     except InvitationLinkError as exc:
         print(str(exc), file=sys.stderr)
         return 1
-    print("Enlace de un solo uso (vence en 48 horas):")
+    hours = int(invitations.TTL[purpose].total_seconds() // 3600)
+    kind = "restablecimiento" if purpose == "reset" else "invitación"
+    print(f"Enlace de {kind}, de un solo uso (vence en {hours} horas):")
     print(url)
+    if "localhost" in url or "127.0.0.1" in url:
+        print(
+            "Aviso: el enlace apunta a tu equipo. Para usarlo en el despliegue, define "
+            "PUBLIC_APP_URL con la URL del frontend (https://...).",
+            file=sys.stderr,
+        )
     return 0
 
 
