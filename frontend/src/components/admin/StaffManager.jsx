@@ -26,7 +26,7 @@ import {
   Typography,
   useMediaQuery,
 } from '@mui/material';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, errorMessage } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
 import { ROLE_LABELS, STATUS_LABELS, emailNotice, formatDateTime } from '../../pages/admin/adminLabels';
@@ -112,7 +112,7 @@ function StatusChip({ status }) {
   return <Chip size="small" color={meta.color} label={meta.label} />;
 }
 
-function Actions({ user, isSelf, onAction }) {
+function Actions({ user, isSelf, onAction, busy }) {
   const [anchor, setAnchor] = useState(null);
   const options = [];
   if (user.status === 'invited') options.push(['resend', 'Reenviar invitación']);
@@ -124,7 +124,12 @@ function Actions({ user, isSelf, onAction }) {
   if (!options.length) return <Typography variant="caption">Tú</Typography>;
   return (
     <>
-      <Button size="small" onClick={(e) => setAnchor(e.currentTarget)} aria-label={`Acciones para ${user.full_name}`}>
+      <Button
+        size="small"
+        disabled={busy}
+        onClick={(e) => setAnchor(e.currentTarget)}
+        aria-label={`Acciones para ${user.full_name}`}
+      >
         Acciones
       </Button>
       <Menu anchorEl={anchor} open={Boolean(anchor)} onClose={() => setAnchor(null)}>
@@ -154,6 +159,9 @@ export default function StaffManager({ listUrl, inviteUrl, userUrl, disabled = f
   const [notice, setNotice] = useState(null);
   const [inviting, setInviting] = useState(false);
   const [confirm, setConfirm] = useState(null);
+  // Una acción a la vez: evita reenvíos dobles por doble clic
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
 
   const load = useCallback(() => {
     api
@@ -169,27 +177,33 @@ export default function StaffManager({ listUrl, inviteUrl, userUrl, disabled = f
     load();
   }, [load]);
 
-  async function call(promise, success) {
+  async function call(request, success) {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
     try {
-      const { data: body } = await promise;
+      const { data: body } = await request();
       setNotice({ severity: body?.email_sent === false ? 'warning' : 'success', text: success(body) });
       load();
     } catch (err) {
       setNotice({ severity: 'error', text: errorMessage(err) });
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
     }
   }
 
   function onAction(key, user) {
     const base = userUrl(user.id);
     if (key === 'resend') {
-      call(api.post(`${base}/invitation`), (body) => emailNotice(body.email_sent));
+      call(() => api.post(`${base}/invitation`), (body) => emailNotice(body.email_sent));
     } else if (key === 'reset') {
       setConfirm({
         title: `¿Restablecer el acceso de ${user.full_name}?`,
         text: 'Su contraseña deja de servir y se cierran sus sesiones abiertas. Recibirá un enlace para elegir otra.',
         action: 'Restablecer',
         danger: true,
-        run: () => call(api.post(`${base}/reset-access`), (body) => emailNotice(body.email_sent)),
+        run: () => call(() => api.post(`${base}/reset-access`), (body) => emailNotice(body.email_sent)),
       });
     } else if (key === 'role') {
       const role = user.role === 'doctor' ? 'tenant_admin' : 'doctor';
@@ -197,7 +211,7 @@ export default function StaffManager({ listUrl, inviteUrl, userUrl, disabled = f
         title: `¿Cambiar el rol de ${user.full_name}?`,
         text: `Pasará a ${ROLE_LABELS[role]}. Su sesión actual se cerrará.`,
         action: 'Cambiar rol',
-        run: () => call(api.patch(base, { role }), () => 'Rol actualizado.'),
+        run: () => call(() => api.patch(base, { role }), () => 'Rol actualizado.'),
       });
     } else if (key === 'deactivate') {
       setConfirm({
@@ -205,10 +219,10 @@ export default function StaffManager({ listUrl, inviteUrl, userUrl, disabled = f
         text: 'Pierde el acceso de inmediato, incluso si tiene la sesión abierta.',
         action: 'Desactivar',
         danger: true,
-        run: () => call(api.patch(base, { is_active: false }), () => 'Usuario desactivado.'),
+        run: () => call(() => api.patch(base, { is_active: false }), () => 'Usuario desactivado.'),
       });
     } else if (key === 'activate') {
-      call(api.patch(base, { is_active: true }), () => 'Usuario reactivado.');
+      call(() => api.patch(base, { is_active: true }), () => 'Usuario reactivado.');
     }
   }
 
@@ -262,7 +276,7 @@ export default function StaffManager({ listUrl, inviteUrl, userUrl, disabled = f
                   </TableCell>
                   <TableCell>{formatDateTime(user.last_login_at)}</TableCell>
                   <TableCell align="right">
-                    <Actions user={user} isSelf={user.id === me?.user_id} onAction={onAction} />
+                    <Actions user={user} isSelf={user.id === me?.user_id} onAction={onAction} busy={busy} />
                   </TableCell>
                 </TableRow>
               ))}
@@ -290,7 +304,7 @@ export default function StaffManager({ listUrl, inviteUrl, userUrl, disabled = f
                 <StatusChip status={user.status} />
               </Stack>
               <Box sx={{ mt: 1, textAlign: 'right' }}>
-                <Actions user={user} isSelf={user.id === me?.user_id} onAction={onAction} />
+                <Actions user={user} isSelf={user.id === me?.user_id} onAction={onAction} busy={busy} />
               </Box>
             </CardContent>
           </Card>
