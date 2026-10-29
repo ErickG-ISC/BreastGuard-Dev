@@ -179,8 +179,11 @@ function DangerZone({ tenant, onChange }) {
                 </Button>
               }
             >
-              Purga solicitada ({formatDateTime(tenant.purge_requested_at)}). La institución está desactivada; el
-              borrado lo ejecuta <code>purge_tenant.py --pending</code>.
+              Purga solicitada ({formatDateTime(tenant.purge_requested_at)}). La institución ya está
+              desactivada: nadie de ella puede entrar. Por seguridad, la app no borra datos clínicos ni la
+              auditoría; el borrado definitivo lo ejecuta una persona operadora desde su computadora con{' '}
+              <code>python -m backend.scripts.purge_tenant --pending</code>. Hasta entonces la solicitud queda
+              pendiente y puedes cancelarla.
             </Alert>
           )}
           {error && <Alert severity="error">{error}</Alert>}
