@@ -114,6 +114,36 @@ def add_patient_owner_policy(name: str, policy: str) -> None:
     add_role_policy(name, policy, rule, with_check_sql=rule)
 
 
+def clinical_access_rule(name: str) -> str:
+    """Regla de acceso clínico por rol (ADR 0009). Solo dos roles ven datos clínicos:
+
+    - `patient`: lo de su propia ficha (`patients.user_id` = usuario del contexto);
+    - `doctor`: lo de las pacientes de las que es médica responsable.
+
+    `tenant_admin` y `platform_admin` no ven nada clínico (la auditoría tiene su propia política).
+    En `patients` la regla mira la fila misma; en las tablas dependientes, un EXISTS sobre la
+    ficha por su PK `(tenant_id, id)` (que a su vez pasa por la RLS de `patients`).
+    """
+    table = ident(name)
+    if table == "patients":
+        own = f"user_id = {CURRENT_USER}"
+        mine = f"responsible_doctor_id = {CURRENT_USER}"
+    else:
+        ref = (
+            "SELECT 1 FROM clinical.patients p "
+            f"WHERE p.tenant_id = {table}.tenant_id AND p.id = {table}.patient_id AND "
+        )
+        own = f"EXISTS ({ref}p.user_id = {CURRENT_USER})"
+        mine = f"EXISTS ({ref}p.responsible_doctor_id = {CURRENT_USER})"
+    return f"({CURRENT_ROLE} = 'patient' AND {own}) OR ({CURRENT_ROLE} = 'doctor' AND {mine})"
+
+
+def add_clinical_access_policy(name: str, policy: str) -> None:
+    """Política RESTRICTIVE con `clinical_access_rule` para lectura y escritura."""
+    rule = clinical_access_rule(name)
+    add_role_policy(name, policy, rule, with_check_sql=rule)
+
+
 def tenant_fk(
     name: str,
     table: str,

@@ -194,7 +194,7 @@ def register_patient(db: Session, data: UserCreate, ip: str | None = None) -> Us
         db.flush()
         # Alta documentada (ADR 0002): contexto del tenant b2c solo para insertar la ficha
         set_transaction_context(db, TenantContext(tenant.id, user.id, "patient"))
-        db.add(Patient(user_id=user.id, display_name=data.full_name))
+        db.add(Patient(user_id=user.id, display_name=data.full_name, origin="propio"))
         db.commit()
     except IntegrityError:
         db.rollback()
