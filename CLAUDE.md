@@ -145,13 +145,19 @@ Reglas de infraestructura:
   - Despachador `POST /internal/reminders/dispatch` (header `X-Cron-Secret` = `REMINDER_CRON_SECRET`, 32+ caracteres; sin él responde 503): `FOR UPDATE SKIP LOCKED` + `UNIQUE (reminder_id, due_at)`, un aviso aunque haya atrasos, correo fuera de la transacción. Usa la sesión de control sin contexto: nunca ve `clinical`. Lo llama `.github/workflows/reminders.yml` cada 15 min (secret `REMINDER_CRON_SECRET` y variable `API_URL` en GitHub). Local: `python -m backend.scripts.dispatch_reminders`.
   - `services/email.py`: `EMAIL_BACKEND=console` (solo registra el destinatario enmascarado) o `resend` (`RESEND_API_KEY`, `EMAIL_FROM`; con `urllib`, sin SDK). Modo discreto por defecto: sin marca ni tema. Siempre lleva enlace de baja (`PUBLIC_APP_URL/baja?token=`).
 - `api/v1/blog.py` + `services/blog.py` (CU-06, público, sin tenant): `GET /blog`, `GET /blog/faq` y `GET /blog/{slug}`. Artículos en `content/blog/*.md` con metadatos entre `---` (parser propio, sin PyYAML; se validan al arrancar). Sin `revisado_por` la UI muestra "Contenido educativo general · borrador", nunca "validado". "Recomendado para ti" lo arma el frontend con `GET /analyses?limit=1`. Lo pendiente de revisión médica está en `docs/contenido-pendiente-de-revision.md`.
+- Fichas de institución y acceso clínico (0013, ADR 0009):
+  - `clinical.patients` lleva `origin` (`propio | importado | creado`), `responsible_doctor_id`, `status` (`pendiente | en_revision | revisado`), edad a una fecha (`age_years`, `age_recorded_on`) y `source_package_id` (índice único parcial por tenant). CHECK `ck_patients_origin`: `propio` ⇒ cuenta y sin médica; `importado | creado` ⇒ médica y sin cuenta. La app solo actualiza `status` y `updated_at`.
+  - Regla única (`rls.clinical_access_rule` / `add_clinical_access_policy`) en toda tabla con paciente: `patient` por `user_id`, `doctor` por `responsible_doctor_id` (en las dependientes, `EXISTS` sobre `patients`). `tenant_admin` y `platform_admin` no ven nada clínico; `audit_log` conserva su política. La doctora no ve las fichas propias de pacientes con cuenta.
+  - FKs con `patient_id`: `analyses → medical_images` y `analysis_reviews → analyses` (las FKs no pasan por RLS).
+  - `clinical.case_notes` (solo inserción, autora = la doctora del contexto) y `clinical.analysis_reviews` (BI-RADS y recomendación **de la médica**, una por análisis). `analyses.profile` (`ecografia_b2c | mastografia_prototipo`) y `dicom_meta`.
+  - Toda tabla clínica nueva con `patient_id` usa `add_clinical_access_policy` y su receta en `tests/isolation/test_rls_por_tabla.py`; `tests/isolation/test_acceso_clinico_por_rol.py` prueba doctora contra doctora y la ausencia de acceso de los admins.
 - `api/v1/images.py`: `POST /upload` (paciente), `GET /images` y `GET /images/{id}` (con URL firmada; ajena o inexistente da el mismo 404). Lecturas, subidas y accesos denegados (`image.denied`) auditados.
 - `api/v1/audit.py`: `GET /audit` para `tenant_admin` con filtros `from`, `to`, `actor_id`, `limit` y `offset`.
 - `api/rate_limit.py`: límites por IP y ruta: `/auth/token` 10/min, `/auth/register` 5/min, `/images/upload` 20/min. La IP sale de `api/client_ip.py`: ignora `X-Forwarded-For` salvo con `TRUSTED_PROXY_HOPS` (en Render, `1`; ver ADR 0004).
 - `backend/scripts/`:
   - `create_platform_admin.py`: como `app_user`, pide la contraseña;
   - `purge_tenant.py`: rol dueño con BYPASSRLS, confirma escribiendo el slug, tiene `--dry-run` y `--pending` (las purgas solicitadas en la UI); conserva `control.admin_events`;
-  - `seed_demo.py`: `--create` crea un tenant `demo-…` con personal invitado y datos clínicos sintéticos (como `app_user`); `--clean` lo purga y solo acepta slugs `demo-`;
+  - `seed_demo.py`: `--create` crea un tenant `demo-…` con personal invitado y pacientes sintéticas como fichas `creado` de la primera médica (como `app_user`, con su contexto); `--clean` lo purga y solo acepta slugs `demo-`;
   - `check_storage.py`: verifica que el bucket sea privado.
 
 ### Frontend (`frontend/src`)
@@ -182,7 +188,7 @@ Pendientes:
 2. Si falla el commit después de subir a Storage, queda un objeto huérfano.
 3. El límite de peticiones es en memoria (una sola instancia); con varias instancias haría falta un almacén compartido.
 4. `legacy.users` conserva emails y hashes del prototipo; borrar el esquema `legacy` cuando ya no haga falta.
-5. La política de paciente deja a `doctor` y `tenant_admin` hacer UPDATE/DELETE en las tablas de la paciente (self_exams, symptom_entries) a nivel de base; hoy solo la app lo impide (endpoints solo de paciente). Decidir en la Semana 4 si se restringe por comando.
+5. ~~Política de paciente abierta al personal~~: resuelta en la Semana 4 (ADR 0009). La doctora solo ve a sus pacientes y `tenant_admin`/`platform_admin` nada clínico.
 6. Correo: Resend sin dominio verificado solo entrega al correo dueño de la cuenta.
 7. La purga desde la UI solo se solicita; la ejecuta una persona con `purge_tenant.py --pending`.
 

@@ -41,14 +41,23 @@ No hay una base por tenant (ese modelo se reemplazó en el ADR 0002). Toda fila 
    - Funciones `clinical.current_tenant_id()`, `current_user_id()` y `current_app_role()`
      (`LANGUAGE sql STABLE`): sin contexto devuelven NULL, así que las políticas fallan cerrado.
    - Política `tenant_isolation` (`USING` + `WITH CHECK`) sobre `tenant_id`.
-   - Políticas RESTRICTIVE por rol (`migrations/rls.py:add_patient_owner_policy`): la paciente
-     solo ve y crea lo suyo; `doctor` y `tenant_admin` ven todo su tenant; `audit_log` solo lo
-     lee el `tenant_admin`.
+   - Política RESTRICTIVE de acceso clínico (`migrations/rls.py:add_clinical_access_policy`,
+     ADR 0009), igual en `USING` y `WITH CHECK`:
+     - la paciente solo ve y crea lo suyo (`patients.user_id`);
+     - la doctora, solo lo de sus pacientes (`patients.responsible_doctor_id`; en las tablas
+       dependientes, por `EXISTS` sobre `patients`);
+     - `tenant_admin` y `platform_admin` no ven nada clínico.
+   - `audit_log` tiene su política propia: solo lo lee el `tenant_admin`.
 6. **Integridad referencial:**
    - Las FKs entre tablas clínicas son compuestas `(tenant_id, x_id)`, y las FKs no pasan por
      RLS.
-   - `symptom_entries` enlaza `self_exams` con `(tenant_id, patient_id, self_exam_id)`: ni
-     siquiera dentro del mismo tenant se enlaza la autoexploración de otra paciente.
+   - Las que unen filas de una misma paciente incluyen `patient_id`, así que ni siquiera dentro
+     del mismo tenant se enlazan filas de otra paciente:
+     - `symptom_entries → self_exams`;
+     - `analyses → medical_images`;
+     - `analysis_reviews → analyses`.
+   - `patients.responsible_doctor_id` es FK compuesta a `control.users`. El CHECK
+     `ck_patients_origin` impide fichas con cuenta y médica a la vez.
 7. **Permisos por columna:** `app_user` solo puede actualizar las columnas listadas en cada
    migración (`grant_app`).
    - `audit_log` y `admin_events` son de solo inserción.
@@ -141,7 +150,12 @@ una base temporal, aplica las migraciones y usa el rol `bg_app_test` (NOBYPASSRL
   - sin contexto se ven 0 filas;
   - UPDATE y DELETE cruzados afectan 0 filas, con control positivo;
   - `WITH CHECK` rechaza el tenant ajeno;
-  - cada FK compuesta rechaza referencias cruzadas.
+  - cada FK compuesta rechaza referencias cruzadas, como la app y también sin RLS (como dueño).
+- **Acceso por rol** (`test_acceso_clinico_por_rol.py`):
+  - doctora contra doctora, del mismo tenant y de otro;
+  - `tenant_admin` y `platform_admin` sin acceso clínico;
+  - FKs de la misma paciente;
+  - CHECK de `patients`.
 - **Matriz de endpoints** (`tests/api/test_acceso_cruzado_endpoints.py`):
   - todo endpoint no público da 401 sin token, con token inválido o expirado y con un esquema
     distinto de Bearer, y 403 por rol;
@@ -158,9 +172,6 @@ una base temporal, aplica las migraciones y usa el rol `bg_app_test` (NOBYPASSRL
   como copia) pero **no implementado**. Hoy no existe ningún flujo entre tenants.
 - **`control` no tiene RLS:** su aislamiento depende del filtro del servicio, cubierto por pruebas
   cruzadas. Una regresión en ese filtro no la detendría la base.
-- **Personal clínico en tablas de la paciente:** la política deja a `doctor` y `tenant_admin`
-  hacer UPDATE y DELETE en `self_exams` y `symptom_entries` de su tenant; hoy solo lo impide la
-  API (endpoints de paciente). Pendiente de decidir con el panel médico.
 - **Rate limit en memoria:** vale para una sola instancia.
 - **Objetos huérfanos en Storage** si falla el commit después de subirlos.
 - **Purga no inmediata:** la UI solo la solicita; hasta correr el script, los datos siguen en la
