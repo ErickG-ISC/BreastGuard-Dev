@@ -26,6 +26,8 @@ from sqlalchemy.engine import make_url
 # detiene hasta que se agregue aquí: así nunca deja filas huérfanas de un tenant.
 CLINICAL_DELETE_ORDER = (
     "audit_log",
+    "case_notes",
+    "analysis_reviews",
     "questionnaires",
     "analyses",
     "symptom_entries",
