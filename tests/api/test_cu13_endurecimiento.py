@@ -149,9 +149,10 @@ class TestAtomicidad:
 
 
 class TestCrucesConDatosEnAmbosTenants:
-    def test_listado_de_tenant_admin_solo_trae_su_tenant(self, client, two_clinics):
+    def test_listado_de_tenant_admin_no_trae_datos_clinicos(self, client, two_clinics):
+        # ADR 0009: tenant_admin no ve datos clínicos, ni de su tenant ni (menos) de otro
         a, b = two_clinics
-        a_image = upload(client, a["patient"]).json()["image_id"]
+        upload(client, a["patient"])
         upload(client, b["patient"])
 
         response = client.get(
@@ -160,7 +161,7 @@ class TestCrucesConDatosEnAmbosTenants:
             headers={**auth_headers(a["admin"]), "X-Tenant-Id": str(b["tenant"].id)},
         )
 
-        assert [img["id"] for img in response.json()] == [a_image]
+        assert response.json() == []
 
     def test_log_filtrado_por_actor_de_otro_tenant_devuelve_vacio(self, client, two_clinics):
         a, b = two_clinics

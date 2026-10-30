@@ -96,8 +96,8 @@ def insert_user(
         if role == "patient":
             patient_id = conn.execute(
                 text(
-                    "INSERT INTO clinical.patients (tenant_id, user_id, display_name) "
-                    "VALUES (:tenant_id, :user_id, 'Paciente de prueba') RETURNING id"
+                    "INSERT INTO clinical.patients (tenant_id, user_id, display_name, origin) "
+                    "VALUES (:tenant_id, :user_id, 'Paciente de prueba', 'propio') RETURNING id"
                 ),
                 {"tenant_id": tenant_id, "user_id": user_id},
             ).scalar_one()

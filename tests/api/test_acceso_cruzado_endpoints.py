@@ -318,7 +318,8 @@ class TestTenantIdDelClienteSeIgnora:
         mine = upload(client, a["patient"])
         theirs = upload(client, b["patient"])
         spoof = {"tenant_id": str(b["tenant"].id)}
-        headers = {**auth_headers(a["admin"]), "X-Tenant-Id": str(b["tenant"].id)}
+        # La propia paciente (la única que ve su imagen; ADR 0009) intenta suplantar el tenant
+        headers = {**auth_headers(a["patient"]), "X-Tenant-Id": str(b["tenant"].id)}
 
         own = client.get(f"{API}/images/{mine}", params=spoof, headers=headers)
         foreign = client.get(f"{API}/images/{theirs}", params=spoof, headers=headers)

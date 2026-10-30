@@ -286,10 +286,17 @@ class TestEndurecimiento:
             )
 
     @pytest.mark.parametrize("role", ["doctor", "tenant_admin"])
-    def test_el_personal_ve_solo_su_tenant(self, client, world, user_factory, role):
+    def test_el_personal_no_ve_autoexploraciones_de_pacientes_ajenas(
+        self, client, world, user_factory, role
+    ):
+        """ADR 0009 invierte esta prueba: antes el personal veía todo su tenant.
+
+        Ahora la doctora solo ve a sus pacientes (aquí ninguna) y tenant_admin nada clínico.
+        """
         mine = start(client, world["a1"])
         start(client, world["b1"])
         staff = user_factory(world["ta"], role=role)
         with tenant_session(staff) as session:
             ids = {str(i) for i in session.scalars(text("SELECT id FROM clinical.self_exams"))}
-        assert ids == {mine["id"]}
+        assert mine["id"] not in ids
+        assert ids == set()

@@ -82,7 +82,8 @@ def _clean_tables(request):
     with engine.begin() as conn:
         conn.execute(
             text(
-                "TRUNCATE clinical.audit_log, clinical.questionnaires, clinical.analyses, "
+                "TRUNCATE clinical.audit_log, clinical.case_notes, clinical.analysis_reviews, "
+                "clinical.questionnaires, clinical.analyses, "
                 "clinical.medical_images, clinical.symptom_entries, clinical.self_exams, "
                 "clinical.patients"
             )

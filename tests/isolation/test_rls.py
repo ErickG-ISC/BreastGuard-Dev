@@ -75,7 +75,8 @@ class TestSinContexto:
 class TestConContextoDeA:
     def test_solo_ve_filas_de_a(self, two_tenants):
         a, b = two_tenants
-        with tenant_session(a["doctor"]) as session:
+        # La paciente es quien ve su ficha e imagen (ADR 0009: la doctora solo a sus pacientes)
+        with tenant_session(a["patient"]) as session:
             assert count(session, "patients") == 1
             assert count(session, "medical_images") == 1
             assert count(session, "patients", "tenant_id = :b", b=b["tenant"].id) == 0
@@ -110,17 +111,29 @@ class TestConContextoDeA:
 
     def test_fk_compuesta_hacia_paciente_de_b_falla(self, two_tenants):
         a, b = two_tenants
-        with tenant_session(a["doctor"]) as session, pytest.raises(DBAPIError, match="foreign key"):
+        # Desde 0013 la política de A ya lo rechaza (la ficha de B no es suya); la FK sola, sin
+        # RLS, se prueba en test_rls_por_tabla.test_fk_compuesta_cruzada_falla
+        with (
+            tenant_session(a["doctor"]) as session,
+            pytest.raises(DBAPIError, match="row-level|foreign key"),
+        ):
             insert_image(session, b["patient"].patient_id, a["doctor"].id)
             session.flush()
 
     def test_ficha_no_puede_apuntar_a_usuario_de_otro_tenant(self, two_tenants):
         a, b = two_tenants
-        with tenant_session(a["doctor"]) as session, pytest.raises(DBAPIError, match="foreign key"):
+        # Contexto forjado: tenant A con el user_id de una paciente de B. La política lo deja
+        # pasar (user_id = el del contexto) y la FK compuesta lo detiene.
+        forged = TenantContext(a["tenant"].id, b["patient"].id, "patient")
+        with new_session(forged) as session, pytest.raises(DBAPIError, match="foreign key"):
             session.execute(
-                text("INSERT INTO clinical.patients (user_id, display_name) VALUES (:u, 'x')"),
+                text(
+                    "INSERT INTO clinical.patients (user_id, display_name, origin) "
+                    "VALUES (:u, 'x', 'propio')"
+                ),
                 {"u": b["patient"].id},
             )
+            session.flush()
 
 
 class TestPoliticasPorRol:
@@ -149,7 +162,7 @@ class TestPoliticasPorRol:
 class TestContextoPorTransaccion:
     def test_commit_y_segunda_transaccion_conservan_el_contexto(self, two_tenants):
         a, _ = two_tenants
-        with tenant_session(a["doctor"]) as session:
+        with tenant_session(a["patient"]) as session:
             assert count(session, "patients") == 1
             session.commit()
             assert count(session, "patients") == 1  # el listener reaplica el contexto
@@ -157,9 +170,9 @@ class TestContextoPorTransaccion:
     def test_conexion_reutilizada_no_arrastra_contexto(self, two_tenants):
         a, b = two_tenants
         # El pool reutiliza conexiones: tras A, una sesión de B y otra sin contexto no ven A
-        with tenant_session(a["doctor"]) as session:
+        with tenant_session(a["patient"]) as session:
             assert count(session, "medical_images") == 1
-        with tenant_session(b["doctor"]) as session:
+        with tenant_session(b["patient"]) as session:
             assert count(session, "medical_images", "id = :img", img=a["image"]) == 0
         with new_session() as session:
             assert count(session, "medical_images") == 0

@@ -10,7 +10,7 @@ from sqlalchemy import create_engine, inspect, text
 
 from backend.app.models import clinical, control  # noqa: F401  (registra las tablas)
 from backend.app.models.base import Base
-from tests.helpers import default_password_hash
+from tests.helpers import default_password_hash, insert_tenant
 from tests.pgtest import (
     OWNER_URL,
     alembic_config,
@@ -39,6 +39,8 @@ CLINICAL_TABLES = {
     "analyses",
     "self_exams",
     "symptom_entries",
+    "case_notes",
+    "analysis_reviews",
 }
 
 
@@ -182,4 +184,122 @@ def test_downgrade_no_borra_datos_clinicos(fresh_db):
 
     with pytest.raises(RuntimeError, match="tiene datos"):
         command.downgrade(config, "0003")
+    assert tables(engine, "clinical") == CLINICAL_TABLES
+
+
+def _seed_b2c_at_0012(engine) -> dict:
+    """Paciente B2C con cuenta, imagen y análisis, tal como existían antes de 0013."""
+    with engine.begin() as conn:
+        b2c = conn.execute(text("SELECT id FROM control.tenants WHERE slug = 'b2c'")).scalar_one()
+        params = {"t": b2c, "pw": default_password_hash()}
+        user = conn.execute(
+            text(
+                "INSERT INTO control.users (tenant_id, email, hashed_password, full_name, role) "
+                "VALUES (:t, 'ana@example.com', :pw, 'Ana', 'patient') RETURNING id"
+            ),
+            params,
+        ).scalar_one()
+        patient = conn.execute(
+            text(
+                "INSERT INTO clinical.patients (tenant_id, user_id, display_name) "
+                "VALUES (:t, :u, 'Ana') RETURNING id"
+            ),
+            {**params, "u": user},
+        ).scalar_one()
+        image = conn.execute(
+            text(
+                "INSERT INTO clinical.medical_images (tenant_id, patient_id, uploaded_by, "
+                "object_path, image_type) VALUES (:t, :p, :u, 'b2c/images/x.png', 'BUSI') "
+                "RETURNING id"
+            ),
+            {**params, "p": patient, "u": user},
+        ).scalar_one()
+        analysis = conn.execute(
+            text(
+                "INSERT INTO clinical.analyses (tenant_id, patient_id, image_id, created_by, "
+                "status, predicted_class, probabilities, confidence, model_version, "
+                "heatmap_path, quality_flags, report) VALUES (:t, :p, :i, :u, 'completed', "
+                "'normal', '{}'::jsonb, 0.9, 'fake', 'b2c/heatmaps/x.png', '[]'::jsonb, "
+                "'{}'::jsonb) RETURNING id"
+            ),
+            {**params, "p": patient, "i": image, "u": user},
+        ).scalar_one()
+    return {"user": user, "patient": patient, "image": image, "analysis": analysis}
+
+
+def test_0013_conserva_las_fichas_existentes_como_propias(fresh_db):
+    url, engine = fresh_db
+    config = alembic_config(url)
+    command.upgrade(config, "0012")
+    before = _seed_b2c_at_0012(engine)
+
+    command.upgrade(config, "head")
+
+    with engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT user_id, origin, status, responsible_doctor_id, source_package_id "
+                "FROM clinical.patients WHERE id = :p"
+            ),
+            {"p": before["patient"]},
+        ).one()
+        profile = conn.execute(
+            text("SELECT profile FROM clinical.analyses WHERE id = :a"),
+            {"a": before["analysis"]},
+        ).scalar_one()
+        images = conn.execute(text("SELECT count(*) FROM clinical.medical_images")).scalar_one()
+    assert row.user_id == before["user"] and row.origin == "propio" and row.status == "pendiente"
+    assert row.responsible_doctor_id is None and row.source_package_id is None
+    assert profile == "ecografia_b2c" and images == 1
+
+    # Sin fichas de institución el downgrade conserva todo, y volver a subir también
+    command.downgrade(config, "0012")
+    command.upgrade(config, "head")
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT count(*) FROM clinical.analyses")).scalar_one() == 1
+        assert (
+            conn.execute(
+                text("SELECT origin FROM clinical.patients WHERE id = :p"), {"p": before["patient"]}
+            ).scalar_one()
+            == "propio"
+        )
+
+
+def test_0013_falla_con_fichas_sin_cuenta(fresh_db):
+    url, engine = fresh_db
+    config = alembic_config(url)
+    command.upgrade(config, "0012")
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO clinical.patients (tenant_id, display_name) "
+                "SELECT id, 'sin cuenta' FROM control.tenants WHERE slug = 'b2c'"
+            )
+        )
+    with pytest.raises(RuntimeError, match="sin user_id ni origen"):
+        command.upgrade(config, "head")
+
+
+def test_downgrade_de_0013_no_borra_fichas_de_institucion(fresh_db):
+    url, engine = fresh_db
+    config = alembic_config(url)
+    command.upgrade(config, "head")
+    clinic = insert_tenant(engine, "clinica-a").id
+    with engine.begin() as conn:
+        doctor = conn.execute(
+            text(
+                "INSERT INTO control.users (tenant_id, email, full_name, role) "
+                "VALUES (:t, 'doc@example.com', 'Doc', 'doctor') RETURNING id"
+            ),
+            {"t": clinic},
+        ).scalar_one()
+        conn.execute(
+            text(
+                "INSERT INTO clinical.patients (tenant_id, display_name, origin, "
+                "responsible_doctor_id) VALUES (:t, 'Ficha', 'creado', :d)"
+            ),
+            {"t": clinic, "d": doctor},
+        )
+    with pytest.raises(RuntimeError, match="fichas de institución"):
+        command.downgrade(config, "0012")
     assert tables(engine, "clinical") == CLINICAL_TABLES

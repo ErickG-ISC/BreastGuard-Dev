@@ -5,6 +5,7 @@ Las tablas se toman del catálogo de Postgres y de los modelos. Cada tabla neces
 `test_toda_tabla_clinica_tiene_receta` falla y obliga a cubrirla en lugar de dejarla sin probar.
 """
 
+import functools
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -51,8 +52,17 @@ class Recipe:
 
 
 def _insert_patient(conn, tenant_id, actor, parents, overrides):
-    values = {"id": uuid.uuid4(), "name": "Ficha de prueba", "user_id": None, **overrides}
-    columns, binds = ["id", "display_name", "user_id"], [":id", ":name", ":user_id"]
+    # Ficha de institución con el actor (una doctora) como responsable (ADR 0009)
+    values = {
+        "id": uuid.uuid4(),
+        "name": "Ficha de prueba",
+        "user_id": None,
+        "origin": "creado",
+        "responsible": actor.id,
+        **overrides,
+    }
+    columns = ["id", "display_name", "user_id", "origin", "responsible_doctor_id"]
+    binds = [":id", ":name", ":user_id", ":origin", ":responsible"]
     if tenant_id is not None:
         columns.append("tenant_id")
         binds.append(":tenant_id")
@@ -238,9 +248,55 @@ def _insert_symptom_entry(conn, tenant_id, actor, parents, overrides):
     return values["id"]
 
 
+def _insert_case_note(conn, tenant_id, actor, parents, overrides):
+    values = {"id": uuid.uuid4(), "patient_id": parents["patient_id"], "author_id": actor.id}
+    values.update(overrides)
+    columns, binds = ["id", "patient_id", "author_id", "body"], [":id", ":patient_id", ":author_id"]
+    binds.append("'nota de prueba'")
+    if tenant_id is not None:
+        columns.append("tenant_id")
+        binds.append(":tenant_id")
+        values["tenant_id"] = tenant_id
+    conn.execute(
+        text(f"INSERT INTO clinical.case_notes ({', '.join(columns)}) VALUES ({', '.join(binds)})"),
+        values,
+    )
+    return values["id"]
+
+
+def _insert_analysis_review(conn, tenant_id, actor, parents, overrides):
+    values = {
+        "id": uuid.uuid4(),
+        "patient_id": parents["patient_id"],
+        "analysis_id": parents["analysis_id"],
+        "reviewed_by": actor.id,
+        **overrides,
+    }
+    columns = ["id", "patient_id", "analysis_id", "reviewed_by", "birads"]
+    binds = [":id", ":patient_id", ":analysis_id", ":reviewed_by", "'2'"]
+    if tenant_id is not None:
+        columns.append("tenant_id")
+        binds.append(":tenant_id")
+        values["tenant_id"] = tenant_id
+    conn.execute(
+        text(
+            f"INSERT INTO clinical.analysis_reviews ({', '.join(columns)}) "
+            f"VALUES ({', '.join(binds)})"
+        ),
+        values,
+    )
+    return values["id"]
+
+
 def _image_parent(conn, tenant_id, actor):
     parents = _patient_parent(conn, tenant_id, actor)
     parents["image_id"] = _insert_image(conn, tenant_id, actor, parents, {})
+    return parents
+
+
+def _analysis_parent(conn, tenant_id, actor):
+    parents = _image_parent(conn, tenant_id, actor)
+    parents["analysis_id"] = _insert_analysis(conn, tenant_id, actor, parents, {})
     return parents
 
 
@@ -254,7 +310,17 @@ RECIPES: dict[str, Recipe] = {
         insert=_insert_patient,
         update_column="display_name",
         update_value="'cambiado'",
-        cross_fk={"fk_patients_user": lambda seed_b, world: {"user_id": world.doctor_b.id}},
+        cross_fk={
+            # Ficha propia que apunta a la cuenta de una paciente de B
+            "fk_patients_user": lambda seed_b, world: {
+                "origin": "propio",
+                "user_id": world.patient_b.id,
+                "responsible": None,
+            },
+            "fk_patients_responsible_doctor": lambda seed_b, world: {
+                "responsible": world.doctor_b.id
+            },
+        },
     ),
     "medical_images": Recipe(
         parents=_patient_parent,
@@ -316,6 +382,31 @@ RECIPES: dict[str, Recipe] = {
             },
         },
     ),
+    "case_notes": Recipe(
+        parents=_patient_parent,
+        insert=_insert_case_note,
+        update_column="body",
+        update_value="'cambiado'",
+        cross_fk={
+            "fk_case_notes_patient": lambda seed_b, world: {
+                "patient_id": seed_b.parents["patient_id"]
+            }
+        },
+    ),
+    "analysis_reviews": Recipe(
+        parents=_analysis_parent,
+        insert=_insert_analysis_review,
+        update_column="birads",
+        update_value="'3'",
+        cross_fk={
+            "fk_analysis_reviews_patient": lambda seed_b, world: {
+                "patient_id": seed_b.parents["patient_id"]
+            },
+            "fk_analysis_reviews_analysis": lambda seed_b, world: {
+                "analysis_id": seed_b.parents["analysis_id"]
+            },
+        },
+    ),
     "audit_log": Recipe(
         parents=lambda conn, tenant_id, actor: {},
         insert=_insert_audit,
@@ -331,7 +422,22 @@ class World:
     b: object
     admin_a: object
     admin_b: object
+    doctor_a: object
     doctor_b: object
+    make_user: Callable
+
+    @functools.cached_property
+    def patient_b(self):
+        # Perezosa: su cuenta trae una ficha propia que alteraría los conteos de `patients`
+        return self.make_user(self.b, role="patient")
+
+    def actor(self, table: str, side: str):
+        """Quien tiene acceso a las filas de `table` en su tenant (ADR 0009).
+
+        Datos clínicos: la doctora responsable de la ficha sembrada. `audit_log`: tenant_admin.
+        """
+        role = "admin" if table == "audit_log" else "doctor"
+        return getattr(self, f"{role}_{side}")
 
 
 @pytest.fixture
@@ -342,7 +448,9 @@ def world(tenant_factory, user_factory) -> World:
         b=b,
         admin_a=user_factory(a, role="tenant_admin"),
         admin_b=user_factory(b, role="tenant_admin"),
+        doctor_a=user_factory(a, role="doctor"),
         doctor_b=user_factory(b, role="doctor"),
+        make_user=user_factory,
     )
 
 
@@ -406,8 +514,8 @@ def test_toda_tabla_clinica_tiene_receta(owner_engine):
 @pytest.mark.parametrize("table", MODEL_TABLES)
 class TestSinContextoPorTabla:
     def test_se_ven_cero_filas(self, owner_engine, world, table):
-        seed(owner_engine, table, world.a, world.admin_a)
-        seed(owner_engine, table, world.b, world.admin_b)
+        seed(owner_engine, table, world.a, world.actor(table, "a"))
+        seed(owner_engine, table, world.b, world.actor(table, "b"))
         assert owner_count(owner_engine, table) == 2  # las filas existen: no es un 0 vacuo
         with new_session() as session:
             count = session.execute(text(f"SELECT count(*) FROM clinical.{table}")).scalar_one()
@@ -416,25 +524,25 @@ class TestSinContextoPorTabla:
     def test_insert_sin_tenant_falla(self, owner_engine, world, table):
         recipe = RECIPES[table]
         with owner_engine.begin() as conn:
-            parents = recipe.parents(conn, world.a.id, world.admin_a)
+            parents = recipe.parents(conn, world.a.id, world.actor(table, "a"))
         with new_session() as session, pytest.raises(DBAPIError, match="row-level|null value"):
-            recipe.insert(session, None, world.admin_a, parents, {})
+            recipe.insert(session, None, world.actor(table, "a"), parents, {})
         assert owner_count(owner_engine, table) == 0
 
     def test_insert_con_tenant_explicito_falla_por_politica(self, owner_engine, world, table):
         recipe = RECIPES[table]
         with owner_engine.begin() as conn:
-            parents = recipe.parents(conn, world.a.id, world.admin_a)
+            parents = recipe.parents(conn, world.a.id, world.actor(table, "a"))
         with new_session() as session, pytest.raises(DBAPIError, match="row-level"):
-            recipe.insert(session, world.a.id, world.admin_a, parents, {})
+            recipe.insert(session, world.a.id, world.actor(table, "a"), parents, {})
 
 
 @pytest.mark.parametrize("table", MODEL_TABLES)
 class TestConContextoDeAPorTabla:
     def test_solo_se_ven_filas_de_a(self, owner_engine, world, table):
-        mine = seed(owner_engine, table, world.a, world.admin_a)
-        theirs = seed(owner_engine, table, world.b, world.admin_b)
-        with tenant_session(world.admin_a) as session:
+        mine = seed(owner_engine, table, world.a, world.actor(table, "a"))
+        theirs = seed(owner_engine, table, world.b, world.actor(table, "b"))
+        with tenant_session(world.actor(table, "a")) as session:
             tenants = set(session.scalars(text(f"SELECT tenant_id FROM clinical.{table}")))
             ids = set(session.scalars(text(f"SELECT id FROM clinical.{table}")))
         assert tenants == {world.a.id}
@@ -442,7 +550,7 @@ class TestConContextoDeAPorTabla:
 
     def test_update_sobre_filas_de_b_afecta_cero(self, owner_engine, world, table):
         recipe = RECIPES[table]
-        theirs = seed(owner_engine, table, world.b, world.admin_b)
+        theirs = seed(owner_engine, table, world.b, world.actor(table, "b"))
         sql = (
             f"UPDATE clinical.{table} SET {recipe.update_column} = {recipe.update_value} "
             "WHERE id = :id"
@@ -451,7 +559,7 @@ class TestConContextoDeAPorTabla:
         self._atacar_y_verificar(owner_engine, world, table, theirs, sql, privileged)
 
     def test_delete_sobre_filas_de_b_afecta_cero(self, owner_engine, world, table):
-        theirs = seed(owner_engine, table, world.b, world.admin_b)
+        theirs = seed(owner_engine, table, world.b, world.actor(table, "b"))
         privileged = app_privilege(owner_engine, table, "DELETE")
         sql = f"DELETE FROM clinical.{table} WHERE id = :id"
         self._atacar_y_verificar(owner_engine, world, table, theirs, sql, privileged)
@@ -464,7 +572,7 @@ class TestConContextoDeAPorTabla:
                 {"id": theirs.id},
             ).scalar_one()
 
-        with tenant_session(world.admin_a) as session:
+        with tenant_session(world.actor(table, "a")) as session:
             if privileged:
                 assert session.execute(text(sql), {"id": theirs.id}).rowcount == 0
             else:
@@ -482,24 +590,27 @@ class TestConContextoDeAPorTabla:
 
         if privileged:
             # Control positivo: el mismo SQL sí afecta 1 fila en el contexto de B (no es vacuo)
-            with tenant_session(world.admin_b) as session:
+            with tenant_session(world.actor(table, "b")) as session:
                 assert session.execute(text(sql), {"id": theirs.id}).rowcount == 1
                 session.rollback()
 
     def test_insert_con_tenant_id_de_b_falla_por_with_check(self, owner_engine, world, table):
         recipe = RECIPES[table]
-        seed_b = seed(owner_engine, table, world.b, world.admin_b)
+        seed_b = seed(owner_engine, table, world.b, world.actor(table, "b"))
         with owner_engine.begin() as conn:
-            parents_a = recipe.parents(conn, world.a.id, world.admin_a)
+            parents_a = recipe.parents(conn, world.a.id, world.actor(table, "a"))
 
         # Control positivo: con el tenant propio el mismo INSERT funciona
-        with tenant_session(world.admin_a) as session:
-            recipe.insert(session, world.a.id, world.admin_a, parents_a, {})
+        with tenant_session(world.actor(table, "a")) as session:
+            recipe.insert(session, world.a.id, world.actor(table, "a"), parents_a, {})
             session.rollback()
 
         # Con el tenant de B falla por WITH CHECK, incluso con filas de apoyo reales de B
-        with tenant_session(world.admin_a) as session, pytest.raises(DBAPIError, match="row-level"):
-            recipe.insert(session, world.b.id, world.admin_a, seed_b.parents, {})
+        with (
+            tenant_session(world.actor(table, "a")) as session,
+            pytest.raises(DBAPIError, match="row-level"),
+        ):
+            recipe.insert(session, world.b.id, world.actor(table, "a"), seed_b.parents, {})
         assert owner_count(owner_engine, table, "tenant_id = :t", t=world.b.id) == 1
         assert owner_count(owner_engine, table, "tenant_id = :t", t=world.a.id) == 0
 
@@ -513,15 +624,22 @@ def _fk_cases():
 @pytest.mark.parametrize(("table", "fk_name"), list(_fk_cases()))
 def test_fk_compuesta_cruzada_falla(owner_engine, world, table, fk_name):
     recipe = RECIPES[table]
-    seed_b = seed(owner_engine, table, world.b, world.admin_b)
+    seed_b = seed(owner_engine, table, world.b, world.actor(table, "b"))
     cross = recipe.cross_fk[fk_name](seed_b, world)
     with owner_engine.begin() as conn:
-        parents_a = recipe.parents(conn, world.a.id, world.admin_a)
+        parents_a = recipe.parents(conn, world.a.id, world.actor(table, "a"))
 
-    with tenant_session(world.admin_a) as session, pytest.raises(DBAPIError, match="foreign key"):
-        recipe.insert(session, None, world.admin_a, parents_a, cross)
+    # Como la app: lo rechaza la política (paciente ajena) o, si la pasa, la FK compuesta
+    with (
+        tenant_session(world.actor(table, "a")) as session,
+        pytest.raises(DBAPIError, match="foreign key|row-level"),
+    ):
+        recipe.insert(session, None, world.actor(table, "a"), parents_a, cross)
         session.flush()
+    # La FK por sí sola, sin RLS (como dueño), también rechaza la referencia a B
+    with pytest.raises(DBAPIError, match="foreign key"), owner_engine.begin() as conn:
+        recipe.insert(conn, world.a.id, world.actor(table, "a"), parents_a, cross)
     # Control positivo: sin la referencia cruzada la misma fila sí se inserta
-    with tenant_session(world.admin_a) as session:
-        recipe.insert(session, None, world.admin_a, parents_a, {})
+    with tenant_session(world.actor(table, "a")) as session:
+        recipe.insert(session, None, world.actor(table, "a"), parents_a, {})
         session.rollback()
