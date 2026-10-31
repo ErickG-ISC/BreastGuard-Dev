@@ -30,6 +30,7 @@ CONTROL_TABLES = {
     "subscriptions",
     "reminders",
     "reminder_notices",
+    "patient_handovers",
 }
 CLINICAL_TABLES = {
     "patients",
@@ -303,3 +304,31 @@ def test_downgrade_de_0013_no_borra_fichas_de_institucion(fresh_db):
     with pytest.raises(RuntimeError, match="fichas de institución"):
         command.downgrade(config, "0012")
     assert tables(engine, "clinical") == CLINICAL_TABLES
+
+
+def test_downgrade_de_0014_no_borra_traspasos(fresh_db):
+    url, engine = fresh_db
+    config = alembic_config(url)
+    command.upgrade(config, "head")
+    clinic = insert_tenant(engine, "clinica-a").id
+    with engine.begin() as conn:
+        doctors = [
+            conn.execute(
+                text(
+                    "INSERT INTO control.users (tenant_id, email, full_name, role) "
+                    "VALUES (:t, :e, 'Doc', 'doctor') RETURNING id"
+                ),
+                {"t": clinic, "e": f"doc{i}@example.com"},
+            ).scalar_one()
+            for i in range(2)
+        ]
+        conn.execute(
+            text(
+                "INSERT INTO control.patient_handovers (tenant_id, from_doctor_id, to_doctor_id) "
+                "VALUES (:t, :f, :d)"
+            ),
+            {"t": clinic, "f": doctors[0], "d": doctors[1]},
+        )
+    with pytest.raises(RuntimeError, match="patient_handovers tiene datos"):
+        command.downgrade(config, "0013")
+    assert "patient_handovers" in tables(engine, "control")

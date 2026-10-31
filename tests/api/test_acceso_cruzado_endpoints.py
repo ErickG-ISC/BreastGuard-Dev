@@ -56,6 +56,13 @@ PROTECTED = {
     "admin_resend_invitation": ("POST", f"{API}/admin/users/{SOME_ID}/invitation", {}),
     "admin_reset_access": ("POST", f"{API}/admin/users/{SOME_ID}/reset-access", {}),
     "admin_events": ("GET", f"{API}/admin/events", {}),
+    "admin_create_handover": (
+        "POST",
+        f"{API}/admin/users/{SOME_ID}/handover",
+        {"json": {"to_user_id": str(SOME_ID)}},
+    ),
+    "admin_list_handovers": ("GET", f"{API}/admin/tenants/{SOME_ID}/handovers", {}),
+    "admin_cancel_handover": ("DELETE", f"{API}/admin/handovers/{SOME_ID}", {}),
     # Administración de la institución (solo tenant_admin)
     "institution_list_users": ("GET", f"{API}/institution/users", {}),
     "institution_invite": ("POST", f"{API}/institution/users", {"json": NEW_STAFF}),
@@ -71,6 +78,16 @@ PROTECTED = {
     ),
     "institution_reset_access": ("POST", f"{API}/institution/users/{SOME_ID}/reset-access", {}),
     "institution_events": ("GET", f"{API}/institution/events", {}),
+    "institution_create_handover": (
+        "POST",
+        f"{API}/institution/users/{SOME_ID}/handover",
+        {"json": {"to_user_id": str(SOME_ID)}},
+    ),
+    "institution_list_handovers": ("GET", f"{API}/institution/handovers", {}),
+    "institution_cancel_handover": ("DELETE", f"{API}/institution/handovers/{SOME_ID}", {}),
+    # Médica (solo doctor)
+    "doctor_list_handovers": ("GET", f"{API}/doctor/handovers", {}),
+    "doctor_accept_handover": ("POST", f"{API}/doctor/handovers/{SOME_ID}/accept", {}),
     # CU-01 (solo pacientes)
     "subscription_get": ("GET", f"{API}/subscription/me", {}),
     "subscription_put": ("PUT", f"{API}/subscription/me", {"json": {"plan_code": "plus"}}),
@@ -165,6 +182,7 @@ PATIENT_ONLY_ENDPOINTS = [
     "notices_read",
 ]
 ADMIN_ENDPOINTS = [name for name in PROTECTED if name.startswith("admin_")]
+DOCTOR_ONLY_ENDPOINTS = [name for name in PROTECTED if name.startswith("doctor_")]
 
 
 def call(client, name: str, headers=None, **extra):
@@ -245,9 +263,22 @@ class TestRolesEnTodosLosEndpoints:
         a, _ = two_clinics
         assert call(client, name, headers=auth_headers(a[role])).status_code == 403
 
+    @pytest.mark.parametrize("name", DOCTOR_ONLY_ENDPOINTS)
+    @pytest.mark.parametrize("role", ["patient", "admin"])
+    def test_endpoints_de_medica_rechazan_a_otros_roles(self, client, two_clinics, name, role):
+        a, _ = two_clinics
+        assert call(client, name, headers=auth_headers(a[role])).status_code == 403
+
     @pytest.mark.parametrize(
         "name",
-        ["images_list", "images_detail", "images_upload", "audit_list", *PATIENT_ONLY_ENDPOINTS],
+        [
+            "images_list",
+            "images_detail",
+            "images_upload",
+            "audit_list",
+            *PATIENT_ONLY_ENDPOINTS,
+            *DOCTOR_ONLY_ENDPOINTS,
+        ],
     )
     def test_platform_admin_no_toca_datos_clinicos(self, client, user_factory, name):
         admin = user_factory(role="platform_admin")

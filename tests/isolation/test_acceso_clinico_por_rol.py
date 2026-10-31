@@ -121,8 +121,16 @@ class TestDoctoraNoSeAsignaPacientesAjenas:
 
     def test_no_reasigna_ni_cambia_el_origen(self, owner_engine, clinics):
         mine = seed(owner_engine, "patients", clinics["a"], clinics["doctor_a1"])
+        # Puede escribir responsible_doctor_id (aceptar un traspaso, 0014), pero solo a su nombre
+        with (
+            tenant_session(clinics["doctor_a1"]) as session,
+            pytest.raises(DBAPIError, match="row-level"),
+        ):
+            session.execute(
+                text("UPDATE clinical.patients SET responsible_doctor_id = :d WHERE id = :id"),
+                {"d": clinics["doctor_a2"].id, "id": mine.id},
+            )
         for column, value in (
-            ("responsible_doctor_id", f"'{clinics['doctor_a2'].id}'"),
             ("origin", "'importado'"),
             ("user_id", "NULL"),
         ):
