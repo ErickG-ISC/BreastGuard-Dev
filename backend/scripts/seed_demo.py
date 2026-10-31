@@ -6,10 +6,11 @@ Uso, desde la raíz del repo (contra la base de DESARROLLO):
     python -m backend.scripts.seed_demo --clean  [--slug demo-clinica]
 
 --create se conecta como app_user (nunca como dueño):
-- en control: el tenant, un tenant_admin y dos médicos INVITADOS (sin contraseña) y cinco
-  pacientes sintéticas; los enlaces de invitación se imprimen SOLO en esta terminal;
-- en clinical, con el contexto del tenant nuevo: fichas, cuestionarios, autoexploraciones y
-  entradas del diario. Sin imágenes (un análisis requeriría Storage y el modelo).
+- en control: el tenant, un tenant_admin y dos médicos INVITADOS (sin contraseña); los enlaces
+  de invitación se imprimen SOLO en esta terminal;
+- en clinical, con el contexto de la primera médica: cinco pacientes sintéticas como fichas de
+  la institución (sin cuenta, ella como responsable) con cuestionario, autoexploración y diario.
+  Sin imágenes (un análisis requeriría Storage y el modelo).
 
 --clean reutiliza purge_tenant (rol dueño de DATABASE_URL) y solo acepta slugs `demo-…`: no
 puede tocar ningún otro tenant.
@@ -121,22 +122,10 @@ def create_demo(
             result.links[f"{role} <{email}>"] = invitations.invitation_url(token)
             staff.append(user)
 
-        accounts = []
-        for index, patient in enumerate(PATIENTS):
-            user = User(
-                tenant_id=tenant.id,
-                email=f"{slug}-paciente-{index}@example.com",
-                full_name=patient[0],
-                role="patient",
-            )
-            db.add(user)
-            db.flush()
-            accounts.append((user, patient))
         db.commit()
-        tenant_id, admin_id = tenant.id, staff[0].id
-        account_ids = [(user.id, data) for user, data in accounts]
+        tenant_id, admin_id, doctor_id = tenant.id, staff[0].id, staff[1].id
 
-    # Datos clínicos con el contexto del tenant nuevo (RLS: solo pueden caer en este tenant)
+    # Fila testigo del chequeo de aislamiento, como la administradora del tenant
     with new_session(TenantContext(tenant_id, admin_id, "tenant_admin")) as db:
         audit.record(
             db,
@@ -147,9 +136,21 @@ def create_demo(
             resource_type="tenant",
             resource_id=tenant_id,
         )
+        db.commit()
+
+    # Pacientes de la institución: fichas sin cuenta, con la primera médica como responsable
+    # (ADR 0009). Se crean con el contexto de esa médica: RLS solo deja escribir sus pacientes.
+    with new_session(TenantContext(tenant_id, doctor_id, "doctor")) as db:
         today = date.today()
-        for user_id, (name, age, family, current, symptoms) in account_ids:
-            patient = Patient(user_id=user_id, display_name=name)
+        for name, age, family, current, symptoms in PATIENTS:
+            patient = Patient(
+                display_name=name,
+                origin="creado",
+                responsible_doctor_id=doctor_id,
+                age_years=age,
+                age_recorded_on=today,
+                status="pendiente",
+            )
             db.add(patient)
             db.flush()
             answers = AnswersV1(
@@ -175,7 +176,7 @@ def create_demo(
             finished = datetime.now(UTC) - timedelta(days=10)
             exam = SelfExam(
                 patient_id=patient.id,
-                created_by=user_id,
+                created_by=doctor_id,
                 content_version=SELF_EXAM_VERSION,
                 started_at=finished - timedelta(minutes=8),
                 finished_at=finished,
@@ -187,7 +188,7 @@ def create_demo(
                 db.add(
                     SymptomEntry(
                         patient_id=patient.id,
-                        created_by=user_id,
+                        created_by=doctor_id,
                         entry_date=today - timedelta(days=10 - offset * 3),
                         side="izquierdo",
                         zone="superior_externo",

@@ -37,7 +37,7 @@ def test_crea_y_limpia_sin_afectar_otros_tenants(
 
     result = create_demo("demo-clinica", admin_email="yo@example.com")
     created = counts(owner_engine, result.tenant_id)
-    assert created["control.users"] == 3 + 5
+    assert created["control.users"] == 3
     assert created["control.invitations"] == 3
     assert created["clinical.patients"] == 5
     assert created["clinical.questionnaires"] == 5

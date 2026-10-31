@@ -47,14 +47,54 @@ class Patient(Base):
             ["control.users.tenant_id", "control.users.id"],
             name="fk_patients_user",
         ),
+        ForeignKeyConstraint(
+            ["tenant_id", "responsible_doctor_id"],
+            ["control.users.tenant_id", "control.users.id"],
+            name="fk_patients_responsible_doctor",
+        ),
+        CheckConstraint(
+            "origin IN ('propio', 'importado', 'creado')", name="ck_patients_origin_values"
+        ),
+        CheckConstraint(
+            "status IN ('pendiente', 'en_revision', 'revisado')", name="ck_patients_status"
+        ),
+        CheckConstraint(
+            "(origin = 'propio' AND user_id IS NOT NULL AND responsible_doctor_id IS NULL) OR "
+            "(origin IN ('importado', 'creado') AND responsible_doctor_id IS NOT NULL "
+            "AND user_id IS NULL)",
+            name="ck_patients_origin",
+        ),
+        CheckConstraint("age_years IS NULL OR age_years BETWEEN 0 AND 120", name="ck_patients_age"),
+        CheckConstraint(
+            "source_package_id IS NULL OR origin = 'importado'", name="ck_patients_source_package"
+        ),
+        Index("ix_patients_doctor_status", "tenant_id", "responsible_doctor_id", "status"),
+        Index("ix_patients_user", "tenant_id", "user_id"),
+        Index(
+            "ux_patients_source_package",
+            "tenant_id",
+            "source_package_id",
+            unique=True,
+            postgresql_where=text("source_package_id IS NOT NULL"),
+        ),
         {"schema": "clinical"},
     )
 
     tenant_id: Mapped[uuid.UUID] = _tenant_id()
     id: Mapped[uuid.UUID] = _id()
+    # Ficha propia (B2C): user_id de la paciente. Ficha de institución: médica responsable.
     user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     display_name: Mapped[str] = mapped_column(Text)
+    origin: Mapped[str] = mapped_column(Text)
+    responsible_doctor_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    status: Mapped[str] = mapped_column(Text, server_default=text("'pendiente'"))
+    # Edad a la fecha de importación o de alta (no fecha de nacimiento)
+    age_years: Mapped[int | None] = mapped_column(SmallInteger)
+    age_recorded_on: Mapped[date | None] = mapped_column(Date)
+    # Paquete del que se importó (sin FK a control: no hay referencias entre esquemas)
+    source_package_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class MedicalImage(Base):
@@ -65,6 +105,8 @@ class MedicalImage(Base):
             ["clinical.patients.tenant_id", "clinical.patients.id"],
             name="fk_medical_images_patient",
         ),
+        # Destino de la FK del análisis: imagen y análisis de la misma paciente
+        UniqueConstraint("tenant_id", "patient_id", "id", name="uq_medical_images_patient_id"),
         CheckConstraint(
             "image_type IN ('BUSI', 'mammography')", name="ck_medical_images_image_type"
         ),
@@ -146,12 +188,20 @@ class Analysis(Base):
             name="fk_analyses_patient",
         ),
         ForeignKeyConstraint(
-            ["tenant_id", "image_id"],
-            ["clinical.medical_images.tenant_id", "clinical.medical_images.id"],
+            ["tenant_id", "patient_id", "image_id"],
+            [
+                "clinical.medical_images.tenant_id",
+                "clinical.medical_images.patient_id",
+                "clinical.medical_images.id",
+            ],
             name="fk_analyses_image",
         ),
+        UniqueConstraint("tenant_id", "patient_id", "id", name="uq_analyses_patient_id"),
         CheckConstraint("status IN ('completed', 'inconclusive')", name="ck_analyses_status"),
         UniqueConstraint("tenant_id", "image_id", name="uq_analyses_image"),
+        CheckConstraint(
+            "profile IN ('ecografia_b2c', 'mastografia_prototipo')", name="ck_analyses_profile"
+        ),
         Index("ix_analyses_patient", "tenant_id", "patient_id", "created_at"),
         {"schema": "clinical"},
     )
@@ -169,6 +219,9 @@ class Analysis(Base):
     heatmap_path: Mapped[str] = mapped_column(Text)  # ruta en Storage, nunca una URL
     quality_flags: Mapped[list] = mapped_column(JSONB)
     report: Mapped[dict] = mapped_column(JSONB)
+    # Perfil del modelo (ecografía B2C o mastografía prototipo) y metadatos DICOM desidentificados
+    profile: Mapped[str] = mapped_column(Text, server_default=text("'ecografia_b2c'"))
+    dicom_meta: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -263,5 +316,69 @@ class SymptomEntry(Base):
     self_exam_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     cycle_day: Mapped[int | None] = mapped_column(SmallInteger)
     in_period: Mapped[bool | None] = mapped_column(Boolean)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class CaseNote(Base):
+    """Nota de la médica sobre una paciente (CU-08). Solo inserción: corregir es otra nota."""
+
+    __tablename__ = "case_notes"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "patient_id"],
+            ["clinical.patients.tenant_id", "clinical.patients.id"],
+            name="fk_case_notes_patient",
+        ),
+        CheckConstraint("char_length(body) BETWEEN 1 AND 4000", name="ck_case_notes_body_length"),
+        Index("ix_case_notes_patient", "tenant_id", "patient_id", "created_at"),
+        {"schema": "clinical"},
+    )
+
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    id: Mapped[uuid.UUID] = _id()
+    patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    author_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    body: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AnalysisReview(Base):
+    """Revisión de la médica sobre un análisis: BI-RADS y recomendación las asigna ELLA."""
+
+    __tablename__ = "analysis_reviews"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "patient_id"],
+            ["clinical.patients.tenant_id", "clinical.patients.id"],
+            name="fk_analysis_reviews_patient",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "patient_id", "analysis_id"],
+            [
+                "clinical.analyses.tenant_id",
+                "clinical.analyses.patient_id",
+                "clinical.analyses.id",
+            ],
+            name="fk_analysis_reviews_analysis",
+        ),
+        CheckConstraint(
+            "birads IN ('0', '1', '2', '3', '4', '4A', '4B', '4C', '5', '6')",
+            name="ck_analysis_reviews_birads",
+        ),
+        CheckConstraint(
+            "char_length(recommendation) <= 2000", name="ck_analysis_reviews_recommendation"
+        ),
+        UniqueConstraint("tenant_id", "analysis_id", name="uq_analysis_reviews_analysis"),
+        {"schema": "clinical"},
+    )
+
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    id: Mapped[uuid.UUID] = _id()
+    patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    analysis_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    birads: Mapped[str | None] = mapped_column(Text)
+    recommendation: Mapped[str | None] = mapped_column(Text)
+    reviewed_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

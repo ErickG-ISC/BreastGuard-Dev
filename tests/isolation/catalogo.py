@@ -20,7 +20,13 @@ SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity,
                AND regexp_replace(pg_get_expr(p.polqual, p.polrelid), '\\s', '', 'g')
                    = '{EXPECTED_TENANT_POLICY}'
                AND regexp_replace(pg_get_expr(p.polwithcheck, p.polrelid), '\\s', '', 'g')
-                   = '{EXPECTED_TENANT_POLICY}') AS tenant_policy
+                   = '{EXPECTED_TENANT_POLICY}') AS tenant_policy,
+       -- tenant_isolation solo separa tenants; el acceso por rol lo da una RESTRICTIVE (ALL o
+       -- por comando) para leer (USING) y otra para insertar (WITH CHECK)
+       EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid = c.oid AND NOT p.polpermissive
+               AND p.polcmd IN ('*', 'r') AND p.polqual IS NOT NULL) AS role_read_policy,
+       EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid = c.oid AND NOT p.polpermissive
+               AND p.polcmd IN ('*', 'a') AND p.polwithcheck IS NOT NULL) AS role_insert_policy
 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname = 'clinical' AND c.relkind IN ('r', 'p')
 """
@@ -40,4 +46,6 @@ def rls_problems(tables) -> list[str]:
             problems.append(f"clinical.{t.relname} sin políticas")
         if not t.tenant_policy:
             problems.append(f"clinical.{t.relname} sin tenant_isolation con USING y WITH CHECK")
+        if not (t.role_read_policy and t.role_insert_policy):
+            problems.append(f"clinical.{t.relname} sin política RESTRICTIVE por rol")
     return problems

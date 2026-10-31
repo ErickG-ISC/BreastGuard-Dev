@@ -185,8 +185,8 @@ def test_contexto_no_se_cruza_entre_peticiones_concurrentes(tenant_factory, user
     users = {}
     for slug in ("clinica-a", "clinica-b"):
         tenant = tenant_factory(slug)
-        users[slug] = (tenant, user_factory(tenant, role="doctor"))
-        user_factory(tenant, role="patient")  # una ficha por tenant
+        # La paciente ve su propia ficha: una fila por tenant (ADR 0009)
+        users[slug] = (tenant, user_factory(tenant, role="patient"))
     errors: list[str] = []
 
     def worker(own: str, other: str) -> None:

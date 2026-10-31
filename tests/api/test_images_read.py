@@ -70,12 +70,13 @@ class TestDetalle:
         assert response.status_code == 404
         assert storage.signed == []
 
-    def test_medico_de_la_clinica_ve_imagenes_de_su_tenant(self, client, scenario):
+    def test_medico_no_ve_fichas_que_no_le_corresponden(self, client, scenario):
+        # ADR 0009: misma clínica pero sin ser su médica responsable -> mismo 404
         image_id = upload(client, scenario["clinic_patient"])
         response = client.get(
             f"/api/v1/images/{image_id}", headers=auth_headers(scenario["clinic_doctor"])
         )
-        assert response.status_code == 200
+        assert response.status_code == 404
 
     def test_medico_de_otro_tenant_recibe_404(self, client, scenario):
         image_id = upload(client, scenario["maria"])
@@ -123,11 +124,12 @@ class TestListado:
 
         assert [img["id"] for img in response.json()] == [mine]
 
-    def test_medico_lista_solo_su_tenant(self, client, scenario):
+    def test_medico_no_lista_fichas_que_no_le_corresponden(self, client, scenario):
+        # ADR 0009: la médica solo ve a sus pacientes; ni otro tenant ni fichas propias ajenas
         upload(client, scenario["maria"])
-        clinic_image = upload(client, scenario["clinic_patient"])
+        upload(client, scenario["clinic_patient"])
         response = client.get("/api/v1/images", headers=auth_headers(scenario["clinic_doctor"]))
-        assert [img["id"] for img in response.json()] == [clinic_image]
+        assert response.json() == []
 
     def test_tenant_id_del_cliente_se_ignora(self, client, scenario, b2c_tenant):
         upload(client, scenario["maria"])

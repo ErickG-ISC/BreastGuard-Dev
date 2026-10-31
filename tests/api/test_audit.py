@@ -34,15 +34,15 @@ def clinics(tenant_factory, user_factory):
 def test_admin_ve_quien_accedio_a_que(client, clinics):
     a, _ = clinics
     image_id = upload(client, a["patient"])
-    client.get(f"/api/v1/images/{image_id}", headers=auth_headers(a["doctor"]))
+    client.get(f"/api/v1/images/{image_id}", headers=auth_headers(a["patient"]))
 
     response = client.get(AUDIT_URL, headers=auth_headers(a["admin"]))
 
     assert response.status_code == 200
     entries = response.json()
     read = next(e for e in entries if e["action"] == "image.read")
-    assert read["actor_id"] == str(a["doctor"].id)
-    assert read["actor_role"] == "doctor"
+    assert read["actor_id"] == str(a["patient"].id)
+    assert read["actor_role"] == "patient"
     assert read["resource_id"] == image_id
     assert read["ip"] == "198.51.100.7"
     assert {"image.upload", "image.read"} <= {e["action"] for e in entries}

@@ -20,6 +20,11 @@ POLICY = (
     f"CREATE POLICY tenant_isolation ON clinical.tmp_sin_proteger AS PERMISSIVE FOR ALL "
     f"USING (tenant_id = {TENANT}) WITH CHECK (tenant_id = {TENANT})"
 )
+ROLE_POLICY = (
+    "CREATE POLICY tmp_by_role ON clinical.tmp_sin_proteger AS RESTRICTIVE FOR ALL "
+    "USING (clinical.current_app_role() = 'patient') "
+    "WITH CHECK (clinical.current_app_role() = 'patient')"
+)
 ENABLE = "ALTER TABLE clinical.tmp_sin_proteger ENABLE ROW LEVEL SECURITY"
 FORCE = "ALTER TABLE clinical.tmp_sin_proteger FORCE ROW LEVEL SECURITY"
 
@@ -36,6 +41,12 @@ CASES = {
             f"USING (tenant_id = {TENANT})",
         ],
         "sin tenant_isolation con USING y WITH CHECK",
+    ),
+    # Solo tenant_isolation: todo el personal del tenant vería la tabla
+    "solo_tenant_isolation": ([BASE, ENABLE, FORCE, POLICY], "sin política RESTRICTIVE por rol"),
+    "restrictiva_sin_with_check": (
+        [BASE, ENABLE, FORCE, POLICY, ROLE_POLICY.split(" WITH CHECK")[0]],
+        "sin política RESTRICTIVE por rol",
     ),
     "sin_tenant_id": (
         [
@@ -70,7 +81,7 @@ def test_el_catalogo_detecta_una_tabla_clinica_mal_protegida(owner_engine, case)
 
 def test_una_tabla_bien_protegida_no_genera_problemas(owner_engine):
     """Control positivo: el detector no es un 'siempre falla'."""
-    assert problems_with(owner_engine, [BASE, ENABLE, FORCE, POLICY]) == []
+    assert problems_with(owner_engine, [BASE, ENABLE, FORCE, POLICY, ROLE_POLICY]) == []
 
 
 def test_la_tabla_temporal_no_sobrevive_al_rollback(owner_engine):
