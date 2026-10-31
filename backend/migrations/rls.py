@@ -114,7 +114,23 @@ def add_patient_owner_policy(name: str, policy: str) -> None:
     add_role_policy(name, policy, rule, with_check_sql=rule)
 
 
-def clinical_access_rule(name: str) -> str:
+# Médicas cuyas pacientes se traspasaron a la usuaria del contexto y aún no se aceptan (0014).
+# Solo ids de control: el tenant_admin crea el traspaso sin leer ningún dato clínico.
+HANDED_OVER_TO_ME = (
+    "SELECT h.from_doctor_id FROM control.patient_handovers h "
+    f"WHERE h.tenant_id = {CURRENT_TENANT} AND h.to_doctor_id = {CURRENT_USER} "
+    "AND h.accepted_at IS NULL AND h.cancelled_at IS NULL"
+)
+
+
+def _responsible_is_me(column: str, handover: bool) -> str:
+    rule = f"{column} = {CURRENT_USER}"
+    if handover:
+        rule = f"({rule} OR {column} IN ({HANDED_OVER_TO_ME}))"
+    return rule
+
+
+def clinical_access_rule(name: str, *, handover: bool = False) -> str:
     """Regla de acceso clínico por rol (ADR 0009). Solo dos roles ven datos clínicos:
 
     - `patient`: lo de su propia ficha (`patients.user_id` = usuario del contexto);
@@ -123,18 +139,21 @@ def clinical_access_rule(name: str) -> str:
     `tenant_admin` y `platform_admin` no ven nada clínico (la auditoría tiene su propia política).
     En `patients` la regla mira la fila misma; en las tablas dependientes, un EXISTS sobre la
     ficha por su PK `(tenant_id, id)` (que a su vez pasa por la RLS de `patients`).
+
+    Con `handover=True` (0014) la doctora también ve a las pacientes de un traspaso pendiente
+    hacia ella, para que nunca queden sin nadie que las vea.
     """
     table = ident(name)
     if table == "patients":
         own = f"user_id = {CURRENT_USER}"
-        mine = f"responsible_doctor_id = {CURRENT_USER}"
+        mine = _responsible_is_me("responsible_doctor_id", handover)
     else:
         ref = (
             "SELECT 1 FROM clinical.patients p "
             f"WHERE p.tenant_id = {table}.tenant_id AND p.id = {table}.patient_id AND "
         )
         own = f"EXISTS ({ref}p.user_id = {CURRENT_USER})"
-        mine = f"EXISTS ({ref}p.responsible_doctor_id = {CURRENT_USER})"
+        mine = f"EXISTS ({ref}{_responsible_is_me('p.responsible_doctor_id', handover)})"
     return f"({CURRENT_ROLE} = 'patient' AND {own}) OR ({CURRENT_ROLE} = 'doctor' AND {mine})"
 
 
@@ -153,9 +172,9 @@ def restrict_command(name: str, command: str, roles: tuple[str, ...]) -> str:
     return policy
 
 
-def add_clinical_access_policy(name: str, policy: str) -> None:
+def add_clinical_access_policy(name: str, policy: str, *, handover: bool = False) -> None:
     """Política RESTRICTIVE con `clinical_access_rule` para lectura y escritura."""
-    rule = clinical_access_rule(name)
+    rule = clinical_access_rule(name, handover=handover)
     add_role_policy(name, policy, rule, with_check_sql=rule)
 
 

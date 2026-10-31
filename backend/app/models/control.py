@@ -269,6 +269,59 @@ class Invitation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class PatientHandover(Base):
+    """Traspaso de las pacientes de una médica a otra (0014). Solo ids: nunca datos clínicos.
+
+    Mientras está pendiente, la regla de acceso deja a la médica de destino ver a esas
+    pacientes; al aceptarlo (con su propio contexto) pasa a ser su responsable.
+    """
+
+    __tablename__ = "patient_handovers"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "from_doctor_id"],
+            ["control.users.tenant_id", "control.users.id"],
+            name="fk_patient_handovers_from",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "to_doctor_id"],
+            ["control.users.tenant_id", "control.users.id"],
+            name="fk_patient_handovers_to",
+        ),
+        CheckConstraint("from_doctor_id <> to_doctor_id", name="ck_patient_handovers_distinct"),
+        CheckConstraint(
+            "accepted_at IS NULL OR cancelled_at IS NULL", name="ck_patient_handovers_closed"
+        ),
+        Index(
+            "ux_patient_handovers_pending",
+            "tenant_id",
+            "from_doctor_id",
+            unique=True,
+            postgresql_where=text("accepted_at IS NULL AND cancelled_at IS NULL"),
+        ),
+        Index(
+            "ix_patient_handovers_to",
+            "tenant_id",
+            "to_doctor_id",
+            postgresql_where=text("accepted_at IS NULL AND cancelled_at IS NULL"),
+        ),
+        {"schema": "control"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    from_doctor_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    to_doctor_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    patients_moved: Mapped[int | None] = mapped_column(Integer)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancelled_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+
+
 class AdminEvent(Base):
     """Bitácora de plataforma: cambios administrativos (sin datos sensibles). Solo inserción."""
 

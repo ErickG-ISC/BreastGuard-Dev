@@ -17,7 +17,17 @@ from sqlalchemy.orm import Session
 
 from backend.app.models.control import AdminEvent
 
-ALLOWED_DETAIL_KEYS = {"fields", "role", "previous_role", "plan", "purpose", "email_sent"}
+ALLOWED_DETAIL_KEYS = {
+    "fields",
+    "role",
+    "previous_role",
+    "plan",
+    "purpose",
+    "email_sent",
+    # Traspasos de pacientes (0014): a quién y cuántas fichas pasaron, nunca cuáles
+    "to_user_id",
+    "patients_moved",
+}
 
 
 @dataclass(frozen=True)
