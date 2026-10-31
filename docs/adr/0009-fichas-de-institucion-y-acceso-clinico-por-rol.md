@@ -88,6 +88,38 @@ En ambos casos solo su médica responsable debe verlas.
 8. **`seed_demo`** crea las pacientes de demostración como fichas `creado` con la primera médica
    como responsable, sin cuentas.
 
+9. **Traspaso de pacientes entre médicas** (migración 0014). Si una doctora se desactiva o deja
+   de serlo, sus fichas no deben quedar invisibles para todos. La administración no puede moverlas
+   (no tiene acceso clínico), así que el traspaso va en dos pasos:
+   1. `tenant_admin` o `platform_admin` (con el alcance de `user_admin.Scope`) crea en
+      `control.patient_handovers` un traspaso pendiente de X a Y. Lleva solo ids y fechas.
+   2. Con el traspaso pendiente, la regla de acceso (`clinical_access_rule(..., handover=True)`)
+      deja a Y ver a las pacientes de X y todo lo que depende de ellas. Las fichas nunca quedan sin
+      nadie que las vea.
+   3. Y lo acepta con **su** contexto (`POST /doctor/handovers/{id}/accept`, TenantDb): un UPDATE
+      de `responsible_doctor_id` a su nombre, con `audit_log` y `admin_events` en la misma
+      transacción.
+
+   Reglas:
+   - la app puede escribir `responsible_doctor_id`, pero la regla de acceso solo deja ponerse a
+     una misma (o dejar a la de un traspaso hacia ella);
+   - una política INSERT impide que una doctora cree fichas a nombre de otra;
+   - un solo traspaso pendiente por médica de origen (uno nuevo reemplaza al anterior);
+   - sin cadenas: no se crea si origen o destino ya están en otro traspaso pendiente;
+   - el destino es una doctora activa del mismo tenant (otro tenant da 404);
+   - cancelar quita la visibilidad de inmediato;
+   - al desactivar a la doctora de destino o quitarle el rol, sus traspasos pendientes se
+     cancelan;
+   - `control` no tiene RLS y `app_user` es el mismo rol de las sesiones clínicas, así que el
+     trigger `control.enforce_handover_writes` hace dos cosas: impide que una sesión con contexto
+     de paciente o doctora cree traspasos, y solo deja que la doctora de destino marque como
+     aceptado uno pendiente hacia ella;
+   - en UPDATE de `patients`, el WITH CHECK exige que la fila resultante quede a nombre de la
+     doctora del contexto. No puede pasar sus fichas a la médica de origen de un traspaso.
+
+   No se usan funciones `SECURITY DEFINER` ni contextos fabricados: toda escritura clínica sale
+   del JWT de quien la hace. Mientras no exista el panel médico, la doctora acepta en `/medico`.
+
 ## Rendimiento
 
 `EXPLAIN (ANALYZE, BUFFERS)` como `app_user` con contexto de doctora, sobre Postgres 17 local:
@@ -105,6 +137,9 @@ En ambos casos solo su médica responsable debe verlas.
 - El `EXISTS` de la política se resuelve como un subplan con hash, evaluado **una vez por
   consulta** (las 200 fichas de la doctora), no una vez por fila.
 - Todos los índices empiezan por `tenant_id`.
+- Con la regla de traspasos de 0014 los tiempos son iguales (0.2–1.7 ms). La subconsulta a
+  `control.patient_handovers` aparece en el plan pero no se ejecuta cuando no hay traspasos
+  pendientes; cuando los hay, usa el índice parcial `ix_patient_handovers_to`.
 
 ## Consecuencias
 
@@ -117,8 +152,6 @@ En ambos casos solo su médica responsable debe verlas.
 - Endpoints clínicos para el personal (panel, caso, importación) llegarán en las ramas siguientes;
   los de paciente no cambian.
 - Pendientes que quedan registrados:
-  - no hay forma de **reasignar** `responsible_doctor_id`: si una doctora se desactiva, sus fichas
-    quedan invisibles hasta que exista ese flujo (columna sin UPDATE para la app);
   - `GET /images` y `GET /images/{id}` siguen aceptando al personal y hoy le responden vacío o
     404 (con `image.denied`). Se limitarán con el panel médico.
   - Un downgrade de 0013 descarta `status` y la edad de las fichas `propio`, que nacieron en 0013.
