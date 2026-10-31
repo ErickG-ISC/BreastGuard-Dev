@@ -294,6 +294,8 @@ export default function TenantDetail() {
             listUrl={`/admin/tenants/${tenant.id}/users`}
             inviteUrl={`/admin/tenants/${tenant.id}/users`}
             userUrl={(userId) => `/admin/users/${userId}`}
+            handoversUrl={`/admin/tenants/${tenant.id}/handovers`}
+            handoverUrl={(id) => `/admin/handovers/${id}`}
             disabled={!tenant.is_active}
           />
         </Box>

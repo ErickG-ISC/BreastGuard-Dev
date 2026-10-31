@@ -31,6 +31,9 @@ export const ACTION_LABELS = {
   'user.activate': 'Usuario reactivado',
   'user.deactivate': 'Usuario desactivado',
   'user.role_change': 'Cambio de rol',
+  'handover.create': 'Traspaso de pacientes creado',
+  'handover.accept': 'Traspaso de pacientes aceptado',
+  'handover.cancel': 'Traspaso de pacientes cancelado',
 };
 
 export function formatDateTime(iso) {

@@ -14,6 +14,7 @@ from backend.app.api.client_ip import client_ip
 from backend.app.api.deps import ControlDb, Sender, require_role
 from backend.app.api.rate_limit import rate_limit
 from backend.app.api.v1.admin import ADMIN_ERRORS, admin_errors
+from backend.app.schemas.handovers import HandoverCreate, HandoverList, HandoverOut
 from backend.app.schemas.tenants import (
     AdminEventOut,
     AdminEventPage,
@@ -24,7 +25,7 @@ from backend.app.schemas.tenants import (
     StaffOut,
     StaffUpdate,
 )
-from backend.app.services import admin_events, user_admin
+from backend.app.services import admin_events, handovers, user_admin
 from backend.app.services.auth import AuthContext
 
 router = APIRouter()
@@ -103,6 +104,35 @@ def reset_access(
     except ADMIN_ERRORS as exc:
         raise admin_errors(exc) from None
     return InvitationSent(email_sent=sent)
+
+
+@router.post(
+    "/users/{user_id}/handover",
+    response_model=HandoverOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[WRITE_LIMIT],
+)
+def create_handover(
+    user_id: uuid.UUID, data: HandoverCreate, auth: TenantAdmin, db: ControlDb, request: Request
+):
+    """Traspasa las pacientes de `user_id` a otra doctora (ella lo acepta después)."""
+    try:
+        return handovers.create(db, _scope(auth), user_id, data, client_ip(request))
+    except ADMIN_ERRORS as exc:
+        raise admin_errors(exc) from None
+
+
+@router.get("/handovers", response_model=HandoverList)
+def list_handovers(auth: TenantAdmin, db: ControlDb):
+    return HandoverList(items=handovers.list_for_tenant(db, _scope(auth), auth.tenant_id))
+
+
+@router.delete("/handovers/{handover_id}", response_model=HandoverOut, dependencies=[WRITE_LIMIT])
+def cancel_handover(handover_id: uuid.UUID, auth: TenantAdmin, db: ControlDb, request: Request):
+    try:
+        return handovers.cancel(db, _scope(auth), handover_id, client_ip(request))
+    except ADMIN_ERRORS as exc:
+        raise admin_errors(exc) from None
 
 
 @router.get("/events", response_model=AdminEventPage)

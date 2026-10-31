@@ -122,6 +122,11 @@ def purge_tenant(
                 text("DELETE FROM control.invitations WHERE tenant_id = :id"), {"id": tenant.id}
             )
             summary.deleted["control.invitations"] = result.rowcount
+            result = conn.execute(
+                text("DELETE FROM control.patient_handovers WHERE tenant_id = :id"),
+                {"id": tenant.id},
+            )
+            summary.deleted["control.patient_handovers"] = result.rowcount
             for table in ("reminder_notices", "reminders", "consents", "subscriptions"):
                 result = conn.execute(
                     text(

@@ -15,6 +15,7 @@ from backend.app.api.v1 import (
     audit,
     auth,
     blog,
+    doctor,
     health,
     images,
     institution,
@@ -92,6 +93,7 @@ app.include_router(symptoms.router, prefix="/api/v1/symptoms")
 app.include_router(reminders.router, prefix="/api/v1")
 app.include_router(internal.router, prefix="/api/v1")
 app.include_router(blog.router, prefix="/api/v1")
+app.include_router(doctor.router, prefix="/api/v1/doctor")
 
 
 @app.get("/")

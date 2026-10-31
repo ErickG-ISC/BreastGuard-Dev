@@ -20,7 +20,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from backend.app.models.control import Tenant, User
+from backend.app.models.control import PatientHandover, Tenant, User
 from backend.app.schemas.tenants import StaffInvite, StaffOut, StaffUpdate
 from backend.app.services import admin_events, invitations
 from backend.app.services import email as email_service
@@ -222,9 +222,42 @@ def update_staff(
             # Al reactivar, los JWT de antes de la desactivación no deben revivir
             user.sessions_valid_after = now
         _event(db, scope, "user.activate" if user.is_active else "user.deactivate", user, ip)
+    if not user.is_active or user.role != "doctor":
+        _cancel_handovers_to(db, scope, user, now, ip)
     user.updated_at = now
     db.commit()
     return user
+
+
+def _cancel_handovers_to(db: Session, scope: Scope, user: User, now: datetime, ip) -> None:
+    """Quien ya no puede aceptar (desactivada o sin rol doctor) deja de recibir traspasos.
+
+    Las fichas vuelven a quedar solo con su médica de origen; la administración puede crear un
+    traspaso nuevo hacia otra doctora.
+    """
+    pending = db.scalars(
+        select(PatientHandover)
+        .where(
+            PatientHandover.tenant_id == user.tenant_id,
+            PatientHandover.to_doctor_id == user.id,
+            PatientHandover.accepted_at.is_(None),
+            PatientHandover.cancelled_at.is_(None),
+        )
+        .with_for_update()
+    ).all()
+    for handover in pending:
+        handover.cancelled_at, handover.cancelled_by = now, scope.actor.user_id
+        admin_events.record(
+            db,
+            actor_id=scope.actor.user_id,
+            actor_role=scope.actor.role,
+            action="handover.cancel",
+            tenant_id=handover.tenant_id,
+            target_type="user",
+            target_id=handover.from_doctor_id,
+            ip=ip,
+            details={"to_user_id": str(handover.to_doctor_id)},
+        )
 
 
 def resend_invitation(

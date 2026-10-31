@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from backend.app.api.client_ip import client_ip
 from backend.app.api.deps import ControlDb, Sender, require_role
 from backend.app.api.rate_limit import rate_limit
+from backend.app.schemas.handovers import HandoverCreate, HandoverList, HandoverOut
 from backend.app.schemas.tenants import (
     AdminEventOut,
     AdminEventPage,
@@ -31,7 +32,7 @@ from backend.app.schemas.tenants import (
     TenantSummary,
     TenantUpdate,
 )
-from backend.app.services import admin_events, invitations, user_admin
+from backend.app.services import admin_events, handovers, invitations, user_admin
 from backend.app.services import tenants as service
 from backend.app.services.auth import AuthContext
 
@@ -230,6 +231,45 @@ def reset_access(
     except ADMIN_ERRORS as exc:
         raise admin_errors(exc) from None
     return InvitationSent(email_sent=sent)
+
+
+# --- Traspaso de pacientes entre médicas (0014) -----------------------------------------
+
+
+@router.post(
+    "/users/{user_id}/handover",
+    response_model=HandoverOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[WRITE_LIMIT],
+)
+def create_handover(
+    user_id: uuid.UUID, data: HandoverCreate, auth: PlatformAdmin, db: ControlDb, request: Request
+):
+    try:
+        return handovers.create(
+            db, user_admin.Scope.for_actor(auth), user_id, data, client_ip(request)
+        )
+    except ADMIN_ERRORS as exc:
+        raise admin_errors(exc) from None
+
+
+@router.get("/tenants/{tenant_id}/handovers", response_model=HandoverList)
+def list_handovers(tenant_id: uuid.UUID, auth: PlatformAdmin, db: ControlDb):
+    try:
+        items = handovers.list_for_tenant(db, user_admin.Scope.for_actor(auth), tenant_id)
+    except ADMIN_ERRORS as exc:
+        raise admin_errors(exc) from None
+    return HandoverList(items=items)
+
+
+@router.delete("/handovers/{handover_id}", response_model=HandoverOut, dependencies=[WRITE_LIMIT])
+def cancel_handover(handover_id: uuid.UUID, auth: PlatformAdmin, db: ControlDb, request: Request):
+    try:
+        return handovers.cancel(
+            db, user_admin.Scope.for_actor(auth), handover_id, client_ip(request)
+        )
+    except ADMIN_ERRORS as exc:
+        raise admin_errors(exc) from None
 
 
 # --- Bitácora de plataforma ---------------------------------------------------------------
