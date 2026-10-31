@@ -24,8 +24,9 @@ import PlatformLog from './pages/admin/PlatformLog';
 import InstitutionUsers from './pages/institution/Users';
 import InstitutionLog from './pages/institution/Log';
 import AcceptInvitation from './pages/AcceptInvitation';
+import DoctorHome from './pages/doctor/DoctorHome';
 import AdminShell from './components/AdminShell';
-import { BusinessIcon, LogIcon, PeopleIcon } from './components/icons';
+import { BusinessIcon, HomeIcon, LogIcon, PeopleIcon } from './components/icons';
 import theme from './theme';
 
 const PLATFORM_NAV = [
@@ -36,6 +37,8 @@ const INSTITUTION_NAV = [
   { label: 'Usuarios', to: '/institucion/usuarios', icon: PeopleIcon },
   { label: 'Bitácora', to: '/institucion/bitacora', icon: LogIcon },
 ];
+// Provisional hasta el panel médico (CU-11), que traerá su propio shell
+const DOCTOR_NAV = [{ label: 'Inicio', to: '/medico', icon: HomeIcon }];
 
 function App() {
   return (
@@ -71,6 +74,16 @@ function App() {
             >
               <Route path="/institucion/usuarios" element={<InstitutionUsers />} />
               <Route path="/institucion/bitacora" element={<InstitutionLog />} />
+            </Route>
+            {/* Médica: por ahora, aceptar traspasos de pacientes (0014) */}
+            <Route
+              element={
+                <ProtectedRoute roles={['doctor']}>
+                  <AdminShell title="Médica" items={DOCTOR_NAV} />
+                </ProtectedRoute>
+              }
+            >
+              <Route path="/medico" element={<DoctorHome />} />
             </Route>
             {/* App de paciente: barra inferior en móvil, barra lateral en escritorio */}
             <Route

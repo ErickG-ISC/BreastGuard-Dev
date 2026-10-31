@@ -12,6 +12,8 @@ export default function InstitutionUsers() {
         listUrl="/institution/users"
         inviteUrl="/institution/users"
         userUrl={(id) => `/institution/users/${id}`}
+        handoversUrl="/institution/handovers"
+        handoverUrl={(id) => `/institution/handovers/${id}`}
       />
     </Stack>
   );

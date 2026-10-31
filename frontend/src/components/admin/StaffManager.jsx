@@ -107,6 +107,104 @@ function ConfirmDialog({ confirm, onClose }) {
   );
 }
 
+// Traspaso de pacientes (0014): solo elige a la doctora de destino; nadie ve datos clínicos
+function HandoverDialog({ source, doctors, onClose, onSubmit }) {
+  const [target, setTarget] = useState('');
+  const options = doctors.filter((d) => d.id !== source?.id);
+
+  return (
+    <Dialog open={Boolean(source)} onClose={onClose} fullWidth maxWidth="sm">
+      <DialogTitle>Traspasar las pacientes de {source?.full_name}</DialogTitle>
+      <DialogContent>
+        <Stack spacing={2} sx={{ mt: 1 }}>
+          <DialogContentText>
+            La doctora elegida verá de inmediato a estas pacientes y al aceptar el traspaso pasará a
+            ser su médica responsable. Tú no verás ningún dato clínico.
+          </DialogContentText>
+          {options.length ? (
+            <FormControl>
+              <InputLabel id="destino-traspaso">Doctora de destino</InputLabel>
+              <Select
+                labelId="destino-traspaso"
+                label="Doctora de destino"
+                value={target}
+                onChange={(e) => setTarget(e.target.value)}
+              >
+                {options.map((d) => (
+                  <MenuItem key={d.id} value={d.id}>
+                    {d.full_name}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          ) : (
+            <Alert severity="info">No hay otra doctora activa en la institución. Invita a una primero.</Alert>
+          )}
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Cancelar</Button>
+        <Button
+          variant="contained"
+          disabled={!target}
+          onClick={() => {
+            onSubmit(source, target);
+            setTarget('');
+          }}
+        >
+          Traspasar
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+const HANDOVER_STATUS = {
+  pending: { label: 'Pendiente de aceptar', color: 'warning' },
+  accepted: { label: 'Aceptado', color: 'success' },
+  cancelled: { label: 'Cancelado', color: 'default' },
+};
+
+function Handovers({ items, onCancel, busy }) {
+  if (!items.length) return null;
+  return (
+    <Card>
+      <CardContent>
+        <Typography variant="subtitle1" component="h3" sx={{ mb: 1 }}>
+          Traspasos de pacientes
+        </Typography>
+        <Stack spacing={1.5}>
+          {items.map((h) => (
+            <Stack
+              key={h.id}
+              direction={{ xs: 'column', sm: 'row' }}
+              sx={{ justifyContent: 'space-between', alignItems: { sm: 'center' }, gap: 1 }}
+            >
+              <Box sx={{ minWidth: 0 }}>
+                <Typography variant="body2">
+                  De {h.from_name} a {h.to_name}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {formatDateTime(h.created_at)}
+                  {h.status === 'accepted' && ` · ${h.patients_moved} pacientes traspasadas`}
+                </Typography>
+              </Box>
+              <Stack direction="row" sx={{ alignItems: 'center', gap: 1 }}>
+                <Chip size="small" color={HANDOVER_STATUS[h.status].color} label={HANDOVER_STATUS[h.status].label} />
+                {h.status === 'pending' && (
+                  <Button size="small" disabled={busy} onClick={() => onCancel(h)}>
+                    Cancelar
+                  </Button>
+                )}
+              </Stack>
+            </Stack>
+          ))}
+        </Stack>
+      </CardContent>
+    </Card>
+  );
+}
+
 function StatusChip({ status }) {
   const meta = STATUS_LABELS[status];
   return <Chip size="small" color={meta.color} label={meta.label} />;
@@ -120,6 +218,7 @@ function Actions({ user, isSelf, onAction, busy }) {
   if (!isSelf) {
     options.push(['role', user.role === 'doctor' ? 'Hacer administración' : 'Cambiar a médico/a']);
     options.push(user.is_active ? ['deactivate', 'Desactivar'] : ['activate', 'Reactivar']);
+    options.push(['handover', 'Traspasar pacientes']);
   }
   if (!options.length) return <Typography variant="caption">Tú</Typography>;
   return (
@@ -151,7 +250,15 @@ function Actions({ user, isSelf, onAction, busy }) {
 
 // Personal de un tenant con alta por invitación (ADR 0008). Lo usan el platform_admin
 // (`/admin/...`) y el tenant_admin (`/institution/...`): cambian solo las URLs.
-export default function StaffManager({ listUrl, inviteUrl, userUrl, disabled = false }) {
+// `handoversUrl` y `handoverUrl(id)`: lista y cancelación de traspasos de pacientes (0014).
+export default function StaffManager({
+  listUrl,
+  inviteUrl,
+  userUrl,
+  handoversUrl,
+  handoverUrl,
+  disabled = false,
+}) {
   const { user: me } = useAuth();
   const desktop = useMediaQuery((theme) => theme.breakpoints.up('md'));
   const [data, setData] = useState(null);
@@ -159,6 +266,8 @@ export default function StaffManager({ listUrl, inviteUrl, userUrl, disabled = f
   const [notice, setNotice] = useState(null);
   const [inviting, setInviting] = useState(false);
   const [confirm, setConfirm] = useState(null);
+  const [handoverSource, setHandoverSource] = useState(null);
+  const [handovers, setHandovers] = useState([]);
   // Una acción a la vez: evita reenvíos dobles por doble clic
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
@@ -171,7 +280,11 @@ export default function StaffManager({ listUrl, inviteUrl, userUrl, disabled = f
         setError('');
       })
       .catch((err) => setError(errorMessage(err, 'No se pudo cargar el personal.')));
-  }, [listUrl]);
+    api
+      .get(handoversUrl)
+      .then(({ data: body }) => setHandovers(body.items))
+      .catch(() => setHandovers([]));
+  }, [listUrl, handoversUrl]);
 
   useEffect(() => {
     load();
@@ -216,14 +329,36 @@ export default function StaffManager({ listUrl, inviteUrl, userUrl, disabled = f
     } else if (key === 'deactivate') {
       setConfirm({
         title: `¿Desactivar a ${user.full_name}?`,
-        text: 'Pierde el acceso de inmediato, incluso si tiene la sesión abierta.',
+        text:
+          'Pierde el acceso de inmediato, incluso si tiene la sesión abierta. Si atiende pacientes, ' +
+          'traspásalas a otra doctora desde Acciones para que no queden sin médica.',
         action: 'Desactivar',
         danger: true,
         run: () => call(() => api.patch(base, { is_active: false }), () => 'Usuario desactivado.'),
       });
     } else if (key === 'activate') {
       call(() => api.patch(base, { is_active: true }), () => 'Usuario reactivado.');
+    } else if (key === 'handover') {
+      setHandoverSource(user);
     }
+  }
+
+  function handover(source, targetId) {
+    setHandoverSource(null);
+    call(
+      () => api.post(`${userUrl(source.id)}/handover`, { to_user_id: targetId }),
+      (body) => `Traspaso creado. ${body.to_name} ya ve a las pacientes y debe aceptarlo desde su cuenta.`,
+    );
+  }
+
+  function cancelHandover(item) {
+    setConfirm({
+      title: '¿Cancelar el traspaso?',
+      text: `${item.to_name} dejará de ver a las pacientes de ${item.from_name}.`,
+      action: 'Cancelar traspaso',
+      danger: true,
+      run: () => call(() => api.delete(handoverUrl(item.id)), () => 'Traspaso cancelado.'),
+    });
   }
 
   async function invite(form) {
@@ -234,6 +369,7 @@ export default function StaffManager({ listUrl, inviteUrl, userUrl, disabled = f
   }
 
   const rows = data?.items ?? [];
+  const activeDoctors = rows.filter((u) => u.role === 'doctor' && u.is_active);
 
   return (
     <Stack spacing={2}>
@@ -309,6 +445,13 @@ export default function StaffManager({ listUrl, inviteUrl, userUrl, disabled = f
             </CardContent>
           </Card>
         ))}
+      <Handovers items={handovers} onCancel={cancelHandover} busy={busy} />
+      <HandoverDialog
+        source={handoverSource}
+        doctors={activeDoctors}
+        onClose={() => setHandoverSource(null)}
+        onSubmit={handover}
+      />
       <InviteDialog open={inviting} onClose={() => setInviting(false)} onSubmit={invite} />
       <ConfirmDialog confirm={confirm} onClose={() => setConfirm(null)} />
     </Stack>
