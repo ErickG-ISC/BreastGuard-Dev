@@ -138,6 +138,21 @@ def clinical_access_rule(name: str) -> str:
     return f"({CURRENT_ROLE} = 'patient' AND {own}) OR ({CURRENT_ROLE} = 'doctor' AND {mine})"
 
 
+def restrict_command(name: str, command: str, roles: tuple[str, ...]) -> str:
+    """RESTRICTIVE por comando: solo `roles` pueden ejecutar `command` (UPDATE o DELETE).
+
+    Se suma (AND) a la regla de acceso clínico: p. ej. la doctora ve el diario de sus pacientes
+    pero no lo modifica ni lo borra. Devuelve el nombre de la política.
+    """
+    if command not in {"UPDATE", "DELETE"}:
+        raise ValueError(f"Solo UPDATE o DELETE: {command}")
+    policy = f"{name}_{command.lower()}_by_role"
+    rule = f"{CURRENT_ROLE} IN ({', '.join(repr(r) for r in roles)})"
+    check = rule if command == "UPDATE" else None
+    add_role_policy(name, policy, rule, command=command, with_check_sql=check)
+    return policy
+
+
 def add_clinical_access_policy(name: str, policy: str) -> None:
     """Política RESTRICTIVE con `clinical_access_rule` para lectura y escritura."""
     rule = clinical_access_rule(name)

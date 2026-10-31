@@ -72,7 +72,20 @@ En ambos casos solo su médica responsable debe verlas.
      ni el `user_id` cambian una vez creados;
    - `analyses` gana `profile` (`ecografia_b2c | mastografia_prototipo`) y `dicom_meta` (lista
      blanca desidentificada, ADR 0011).
-7. **`seed_demo`** crea las pacientes de demostración como fichas `creado` con la primera médica
+7. **Comandos por rol** (`rls.restrict_command`, `COMMAND_RULES` en 0013): políticas RESTRICTIVE
+   `FOR UPDATE` / `FOR DELETE` además de la regla de acceso.
+   - Solo la paciente modifica o borra lo suyo: UPDATE y DELETE de `medical_images`,
+     `self_exams` y `symptom_entries`, y DELETE de `analyses`. La doctora **ve** los datos de sus
+     pacientes y **agrega** (análisis, notas, revisiones), pero no altera el diario ni los
+     resultados.
+   - Solo la doctora cambia el estado del caso (UPDATE de `patients`) y su revisión (UPDATE de
+     `analysis_reviews`).
+   - El catálogo (`tests/isolation/catalogo.py`) exige en toda tabla clínica una política
+     RESTRICTIVE de lectura (USING) y otra de inserción (WITH CHECK); una tabla con solo
+     `tenant_isolation` hace fallar la prueba.
+   - La migración llama a `assert_bypass` al subir y al bajar: con un dueño sin BYPASSRLS, sus
+     chequeos verían 0 filas y el downgrade borraría columnas con datos.
+8. **`seed_demo`** crea las pacientes de demostración como fichas `creado` con la primera médica
    como responsable, sin cuentas.
 
 ## Rendimiento
@@ -103,3 +116,9 @@ En ambos casos solo su médica responsable debe verlas.
 - El chequeo de aislamiento (CU-12) sigue usando `audit_log` como fila testigo.
 - Endpoints clínicos para el personal (panel, caso, importación) llegarán en las ramas siguientes;
   los de paciente no cambian.
+- Pendientes que quedan registrados:
+  - no hay forma de **reasignar** `responsible_doctor_id`: si una doctora se desactiva, sus fichas
+    quedan invisibles hasta que exista ese flujo (columna sin UPDATE para la app);
+  - `GET /images` y `GET /images/{id}` siguen aceptando al personal y hoy le responden vacío o
+    404 (con `image.denied`). Se limitarán con el panel médico.
+  - Un downgrade de 0013 descarta `status` y la edad de las fichas `propio`, que nacieron en 0013.

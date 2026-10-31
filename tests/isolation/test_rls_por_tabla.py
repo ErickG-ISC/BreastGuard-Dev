@@ -6,6 +6,7 @@ Las tablas se toman del catálogo de Postgres y de los modelos. Cada tabla neces
 """
 
 import functools
+import importlib
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -21,6 +22,11 @@ from tests.helpers import tenant_session
 from tests.pgtest import TEST_APP_ROLE
 
 pytestmark = pytest.mark.usefixtures("database")
+
+# Quién puede hacer UPDATE/DELETE por tabla: misma fuente que la migración (ADR 0009)
+COMMAND_RULES = importlib.import_module(
+    "backend.migrations.versions.0013_pacientes_institucion"
+).COMMAND_RULES
 
 MODEL_TABLES = sorted(t.name for t in Base.metadata.tables.values() if t.schema == "clinical")
 MODEL_FKS = sorted(
@@ -301,6 +307,8 @@ def _analysis_parent(conn, tenant_id, actor):
 
 
 def _patient_parent(conn, tenant_id, actor):
+    if actor.role == "patient":
+        return {"patient_id": actor.patient_id}  # su ficha propia
     return {"patient_id": _insert_patient(conn, tenant_id, actor, {}, {})}
 
 
@@ -439,6 +447,12 @@ class World:
         role = "admin" if table == "audit_log" else "doctor"
         return getattr(self, f"{role}_{side}")
 
+    def writer_b(self, table: str, command: str):
+        """Quien sí puede ejecutar `command` sobre filas de B (para el control positivo)."""
+        if COMMAND_RULES.get((table, command)) == ("patient",):
+            return self.patient_b
+        return self.actor(table, "b")
+
 
 @pytest.fixture
 def world(tenant_factory, user_factory) -> World:
@@ -550,22 +564,24 @@ class TestConContextoDeAPorTabla:
 
     def test_update_sobre_filas_de_b_afecta_cero(self, owner_engine, world, table):
         recipe = RECIPES[table]
-        theirs = seed(owner_engine, table, world.b, world.actor(table, "b"))
+        owner_b = world.writer_b(table, "UPDATE")
+        theirs = seed(owner_engine, table, world.b, owner_b)
         sql = (
             f"UPDATE clinical.{table} SET {recipe.update_column} = {recipe.update_value} "
             "WHERE id = :id"
         )
         privileged = app_privilege(owner_engine, table, "UPDATE", recipe.update_column)
-        self._atacar_y_verificar(owner_engine, world, table, theirs, sql, privileged)
+        self._atacar_y_verificar(owner_engine, world, table, theirs, sql, privileged, owner_b)
 
     def test_delete_sobre_filas_de_b_afecta_cero(self, owner_engine, world, table):
-        theirs = seed(owner_engine, table, world.b, world.actor(table, "b"))
+        owner_b = world.writer_b(table, "DELETE")
+        theirs = seed(owner_engine, table, world.b, owner_b)
         privileged = app_privilege(owner_engine, table, "DELETE")
         sql = f"DELETE FROM clinical.{table} WHERE id = :id"
-        self._atacar_y_verificar(owner_engine, world, table, theirs, sql, privileged)
+        self._atacar_y_verificar(owner_engine, world, table, theirs, sql, privileged, owner_b)
 
     @staticmethod
-    def _atacar_y_verificar(owner_engine, world, table, theirs, sql, privileged):
+    def _atacar_y_verificar(owner_engine, world, table, theirs, sql, privileged, owner_b):
         with owner_engine.connect() as conn:
             before = conn.execute(
                 text(f"SELECT to_jsonb(t) FROM clinical.{table} t WHERE id = :id"),
@@ -590,7 +606,7 @@ class TestConContextoDeAPorTabla:
 
         if privileged:
             # Control positivo: el mismo SQL sí afecta 1 fila en el contexto de B (no es vacuo)
-            with tenant_session(world.actor(table, "b")) as session:
+            with tenant_session(owner_b) as session:
                 assert session.execute(text(sql), {"id": theirs.id}).rowcount == 1
                 session.rollback()
 

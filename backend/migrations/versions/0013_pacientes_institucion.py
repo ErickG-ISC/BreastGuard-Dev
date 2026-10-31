@@ -30,10 +30,12 @@ from backend.migrations.rls import (
     add_patient_owner_policy,
     add_role_policy,
     app_role,
+    assert_bypass,
     assert_empty,
     create_tenant_table,
     enable_tenant_rls,
     grant_app,
+    restrict_command,
     revoke_supabase_api_roles,
     table_exists,
     tenant_fk,
@@ -55,6 +57,19 @@ DEPENDENT_POLICIES = {
 ORIGINS = ("propio", "importado", "creado")
 STATUSES = ("pendiente", "en_revision", "revisado")
 BIRADS = ("0", "1", "2", "3", "4", "4A", "4B", "4C", "5", "6")
+# Quién puede modificar o borrar (además de ver la fila). La doctora solo agrega datos de sus
+# pacientes y cambia el estado del caso o su revisión; lo de la paciente solo lo cambia ella.
+COMMAND_RULES = {
+    ("medical_images", "UPDATE"): ("patient",),
+    ("medical_images", "DELETE"): ("patient",),
+    ("analyses", "DELETE"): ("patient",),
+    ("self_exams", "UPDATE"): ("patient",),
+    ("self_exams", "DELETE"): ("patient",),
+    ("symptom_entries", "UPDATE"): ("patient",),
+    ("symptom_entries", "DELETE"): ("patient",),
+    ("patients", "UPDATE"): ("doctor",),
+    ("analysis_reviews", "UPDATE"): ("doctor",),
+}
 
 
 def _has_column(table: str, column: str) -> bool:
@@ -94,6 +109,8 @@ def _in(values: tuple[str, ...]) -> str:
 
 
 def upgrade() -> None:
+    # Lee y reescribe fichas: con RLS forzado, un dueño sin bypass vería 0 filas sin error
+    assert_bypass(op.get_bind())
     # 1. Expandir
     new_columns = (
         sa.Column("origin", sa.Text(), nullable=True),
@@ -286,11 +303,15 @@ def upgrade() -> None:
     add_clinical_access_policy("patients", "patients_by_role")
     for table, policy in DEPENDENT_POLICIES.items():
         add_clinical_access_policy(table, policy)
+    for (table, command), roles in COMMAND_RULES.items():
+        restrict_command(table, command, roles)
     revoke_supabase_api_roles()
 
 
 def downgrade() -> None:
     bind = op.get_bind()
+    # Sin bypass los chequeos de abajo verían 0 filas y los DROP COLUMN borrarían datos
+    assert_bypass(bind)
     for table in ("analysis_reviews", "case_notes"):
         if table_exists(table, CLINICAL):
             assert_empty(f"clinical.{table}", f"clinical.{table} tiene datos; 0013 no los borra.")
@@ -303,6 +324,11 @@ def downgrade() -> None:
     ).first():
         raise RuntimeError("Hay análisis de mastografía; el downgrade de 0013 no los borra.")
 
+    for table, command in COMMAND_RULES:
+        if table_exists(table, CLINICAL):
+            op.execute(
+                f"DROP POLICY IF EXISTS {table}_{command.lower()}_by_role ON clinical.{table}"
+            )
     op.execute("DROP TABLE IF EXISTS clinical.analysis_reviews")
     op.execute("DROP TABLE IF EXISTS clinical.case_notes")
 

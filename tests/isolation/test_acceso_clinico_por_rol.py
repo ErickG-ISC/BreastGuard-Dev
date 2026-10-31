@@ -242,3 +242,72 @@ class TestChecksDePatients:
                 origin="creado",
                 responsible_doctor_id=clinics["doctor_b"].id,
             )
+
+
+PATIENT_ONLY = [
+    ("medical_images", "UPDATE clinical.medical_images SET prediction = 'x' WHERE id = :id"),
+    ("medical_images", "DELETE FROM clinical.medical_images WHERE id = :id"),
+    ("analyses", "DELETE FROM clinical.analyses WHERE id = :id"),
+    ("self_exams", "UPDATE clinical.self_exams SET note = 'x' WHERE id = :id"),
+    ("self_exams", "DELETE FROM clinical.self_exams WHERE id = :id"),
+    ("symptom_entries", "UPDATE clinical.symptom_entries SET intensity = 9 WHERE id = :id"),
+    ("symptom_entries", "DELETE FROM clinical.symptom_entries WHERE id = :id"),
+]
+
+
+class TestComandosPorRol:
+    """La doctora ve los datos de sus pacientes pero no los modifica ni los borra (ADR 0009)."""
+
+    @pytest.mark.parametrize(("table", "sql"), PATIENT_ONLY)
+    def test_la_doctora_no_modifica_ni_borra_datos_de_sus_pacientes(
+        self, owner_engine, clinics, table, sql
+    ):
+        doctor = clinics["doctor_a1"]
+        mine = seed(owner_engine, table, clinics["a"], doctor)
+        assert mine.id in visible_ids(doctor, table)  # la ve: el 0 no es por no verla
+        with tenant_session(doctor) as session:
+            assert session.execute(text(sql), {"id": mine.id}).rowcount == 0
+            session.rollback()
+
+    @pytest.mark.parametrize(("table", "sql"), PATIENT_ONLY)
+    def test_la_paciente_si_modifica_y_borra_lo_suyo(
+        self, owner_engine, clinics, user_factory, table, sql
+    ):
+        maria = user_factory(clinics["a"], role="patient")
+        mine = seed(owner_engine, table, clinics["a"], maria)
+        with tenant_session(maria) as session:
+            assert session.execute(text(sql), {"id": mine.id}).rowcount == 1
+            session.rollback()
+
+    def test_la_paciente_no_cambia_el_estado_de_su_ficha(self, clinics, user_factory):
+        maria = user_factory(clinics["a"], role="patient")
+        with tenant_session(maria) as session:
+            updated = session.execute(
+                text("UPDATE clinical.patients SET status = 'revisado' WHERE id = :id"),
+                {"id": maria.patient_id},
+            )
+            assert updated.rowcount == 0
+            session.rollback()
+
+    def test_la_paciente_no_modifica_revisiones(self, owner_engine, clinics):
+        review = seed(owner_engine, "analysis_reviews", clinics["a"], clinics["doctor_a1"])
+        # Contexto de paciente con el id de la responsable: aun así el comando es solo de doctora
+        forged = TenantContext(clinics["a"].id, clinics["doctor_a1"].id, "patient")
+        with new_session(forged) as session:
+            updated = session.execute(
+                text("UPDATE clinical.analysis_reviews SET birads = '5' WHERE id = :id"),
+                {"id": review.id},
+            )
+            assert updated.rowcount == 0
+            session.rollback()
+
+    def test_la_doctora_si_actualiza_su_revision(self, owner_engine, clinics):
+        doctor = clinics["doctor_a1"]
+        review = seed(owner_engine, "analysis_reviews", clinics["a"], doctor)
+        with tenant_session(doctor) as session:
+            updated = session.execute(
+                text("UPDATE clinical.analysis_reviews SET birads = '3' WHERE id = :id"),
+                {"id": review.id},
+            )
+            assert updated.rowcount == 1
+            session.rollback()
