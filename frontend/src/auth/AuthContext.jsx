@@ -40,6 +40,12 @@ export function AuthProvider({ children }) {
 
   const logout = useCallback(() => {
     tokenStore.clear();
+    try {
+      // Código de un paquete pendiente de importar (CU-08): no sobrevive a la sesión
+      sessionStorage.removeItem('pending_import_code');
+    } catch {
+      // sin almacenamiento
+    }
     setUser(null);
   }, []);
 

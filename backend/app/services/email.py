@@ -166,6 +166,20 @@ def compose_share_notice(*, to: str) -> EmailMessage:
     )
 
 
+def compose_handover_notice(*, to: str) -> EmailMessage:
+    """Se creó un traspaso de pacientes en tu institución (sin nombres ni datos clínicos)."""
+    base = os.environ.get("PUBLIC_APP_URL", "http://localhost:5173").rstrip("/")
+    return EmailMessage(
+        to=to,
+        subject="Cambio en la asignación de pacientes",
+        body=(
+            "Hola:\n\nSe registró un traspaso de pacientes en tu institución. Si no lo "
+            f"esperabas, revisa la bitácora o avisa a la administración: {base}/login"
+        ),
+        from_name="BreastGuard",
+    )
+
+
 def compose(*, to: str, kind: str, discreet: bool, unsubscribe_url: str) -> EmailMessage:
     subject = DISCREET_SUBJECT if discreet else SUBJECTS[kind]
     body = DISCREET_BODY if discreet else BODIES[kind]

@@ -36,6 +36,17 @@ class RateLimiter:
             hits.append(now)
             return None
 
+    def blocked(self, key: tuple[str, str], limit: int, window: float) -> bool:
+        """¿Ya llegó al límite? No cuenta una petición (para contar solo los fallos)."""
+        now = time.monotonic()
+        with self._lock:
+            hits = self._hits.get(key)
+            if not hits:
+                return False
+            while hits and now - hits[0] >= window:
+                hits.popleft()
+            return len(hits) >= limit
+
     def _prune(self, now: float, window: float) -> None:
         for key in [k for k, v in self._hits.items() if not v or now - v[-1] >= window]:
             del self._hits[key]

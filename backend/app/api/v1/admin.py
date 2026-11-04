@@ -243,11 +243,16 @@ def reset_access(
     dependencies=[WRITE_LIMIT],
 )
 def create_handover(
-    user_id: uuid.UUID, data: HandoverCreate, auth: PlatformAdmin, db: ControlDb, request: Request
+    user_id: uuid.UUID,
+    data: HandoverCreate,
+    auth: PlatformAdmin,
+    db: ControlDb,
+    sender: Sender,
+    request: Request,
 ):
     try:
         return handovers.create(
-            db, user_admin.Scope.for_actor(auth), user_id, data, client_ip(request)
+            db, user_admin.Scope.for_actor(auth), user_id, data, client_ip(request), sender
         )
     except ADMIN_ERRORS as exc:
         raise admin_errors(exc) from None

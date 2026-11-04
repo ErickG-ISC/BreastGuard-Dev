@@ -113,11 +113,16 @@ def reset_access(
     dependencies=[WRITE_LIMIT],
 )
 def create_handover(
-    user_id: uuid.UUID, data: HandoverCreate, auth: TenantAdmin, db: ControlDb, request: Request
+    user_id: uuid.UUID,
+    data: HandoverCreate,
+    auth: TenantAdmin,
+    db: ControlDb,
+    sender: Sender,
+    request: Request,
 ):
     """Traspasa las pacientes de `user_id` a otra doctora (ella lo acepta después)."""
     try:
-        return handovers.create(db, _scope(auth), user_id, data, client_ip(request))
+        return handovers.create(db, _scope(auth), user_id, data, client_ip(request), sender)
     except ADMIN_ERRORS as exc:
         raise admin_errors(exc) from None
 

@@ -1,6 +1,6 @@
 # ADR 0010: Paquete compartido cifrado (CU-07)
 
-- Estado: aceptado (la parte de crear, listar, revocar y caducar; la importación llega con CU-08)
+- Estado: aceptado (crear, listar, revocar, caducar e importar)
 - Fecha: 2026-11-04
 - Casos de uso: CU-07 (compartir con la médica) y CU-08 (importar)
 
@@ -92,6 +92,55 @@ tenant. Además, el servidor no debe poder leer lo compartido ni guardar el cód
       correo tiene cuenta.
     - El HMAC lleva un prefijo de dominio, porque `SECRET_KEY` también firma los JWT.
 
+11. **Importación como copia** (CU-08, `services/share_import.py`,
+    `POST /doctor/shares/import`, solo doctora, 10/min):
+    1. **Reclamo atómico en control** (sesión sin contexto): un solo UPDATE pasa el paquete a
+       `importando` si el código es vigente, la destinataria es ella o no hay destinataria, y el
+       paquete está activo (o es un reclamo suyo de hace más de 10 minutos). Solo una petición
+       gana. Cualquier otro caso (segundo uso, caducado, revocado, código incorrecto u otra
+       destinataria) da el mismo 404.
+    2. **Descifrado en memoria:** la etiqueta de AES-GCM prueba la llave.
+    3. **Copia en la sesión `TenantDb` de la doctora**, bajo RLS de su tenant:
+       - ficha `importado` con ella como responsable y `source_package_id`;
+       - imágenes y heatmaps a `{su_slug}/...` con rutas nuevas;
+       - análisis, autoexploraciones, diario (con sus enlaces) y cuestionario, con ids nuevos;
+       - `share.import` en su auditoría.
+    4. **Confirmación en control:**
+       - estado `importado`;
+       - evento `importado` con los nombres de su institución y de ella;
+       - su aviso queda leído;
+       - se borra `transfer/`.
+    - **Si algo falla:** rollback, borrado de lo subido y liberación del reclamo (se puede
+      reintentar). Si el proceso muere entre copiar y confirmar, el reintento encuentra la ficha
+      por el índice único y solo confirma, sin duplicar.
+    - **Intentos fallidos:** 5 por cuenta en 15 minutos (en memoria, como el resto del límite de
+      peticiones). Un código válido intentado por otra cuenta suma al paquete; a los 5, se revoca.
+12. **`reasignado`** (0016): al aceptar un traspaso de fichas importadas, la doctora que acepta
+    escribe el evento con su contexto. El trigger lo admite solo si:
+    - el paquete se importó en su tenant;
+    - una ficha de ese paquete la tiene como responsable;
+    - los nombres son los suyos y los de su institución.
+
+    Crear un traspaso además avisa por correo a la médica de origen y a las demás administradoras
+    (riesgo de una segunda cuenta de la misma persona, ADR 0009).
+    - **Contenido no confiable** (revisión de aislamiento): el contenido descifrado se valida
+      con `schemas/share_payload.py` antes de copiar nada. El esquema impone:
+      - tipos cerrados y sin campos extra;
+      - nombres de objeto `^[0-9a-f]{32}\.bin$`, nunca rutas;
+      - como máximo 10 análisis y nunca más que `analyses_count`;
+      - límites de longitud.
+
+      Cualquier error libera el reclamo y borra lo subido (502, nunca 500).
+    - **Confirmación:** `_confirm` solo confirma si el reclamo sigue siendo de quien importa.
+      La limpieza no caduca un reclamo de menos de 10 minutos.
+    - **Destinataria purgada:** si se purga su institución, `recipient_user_id` queda nulo y el
+      código sirve a cualquier doctora que lo tenga, hasta que caduque.
+13. **Frontend:**
+    - `/importar` es pública: guarda el código del fragmento en `sessionStorage`, lo borra del
+      historial y pide iniciar sesión;
+    - `/medico` lleva a la médica a `/medico/importar` y muestra el aviso "tienes un paquete".
+   - el código pendiente se borra al cerrar sesión y si quien abre el enlace no es doctora.
+
 ## Consecuencias
 
 - Rotar `SECRET_KEY` invalida los paquetes activos (duran como máximo 7 días) y las sesiones.
@@ -109,5 +158,5 @@ tenant. Además, el servidor no debe poder leer lo compartido ni guardar el cód
   destinataria. Lo mitigan la caducidad corta, el uso único y la revocación.
 - La purga de un tenant borra sus paquetes y el contenido de `transfer/` de cada uno.
 - `cryptography` queda fijada explícitamente (ya venía con `python-jose`).
-- Pendiente para la rama de importación: el reclamo atómico, el descifrado y la copia en el
-  tenant de la médica, el límite de intentos fallidos y los eventos `importado` y `reasignado`.
+- La paciente ve `importado` y `reasignado` en "Mis paquetes"; la campana de la paciente
+  todavía no muestra estos avisos.

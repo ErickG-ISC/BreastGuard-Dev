@@ -88,3 +88,27 @@ class CleanupOut(BaseModel):
     expired: int
     purged: int
     failed: int
+
+
+class ShareImport(BaseModel):
+    """El código lo escribe o lo trae el enlace (fragmento #c=); nunca va en la URL de la API."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = Field(min_length=1, max_length=64)
+
+
+class ShareImported(BaseModel):
+    patient_id: uuid.UUID
+    analyses: int
+    symptoms: int
+    already_imported: bool
+
+
+class InboxNoticeOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    kind: str
+    created_at: datetime
+    read_at: datetime | None

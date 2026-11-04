@@ -135,6 +135,20 @@ de los errores solo se registra el tipo.
 - **Recordatorios (ADR 0007):** el despachador usa la sesión de control sin contexto, así que no
   puede ver `clinical` aunque quisiera.
 
+## 6 bis. Compartir con la médica (CU-07 y CU-08, ADR 0010)
+
+La paciente y la médica están en tenants distintos y **ninguna política cruza tenants**. La
+paciente genera una copia cifrada y la médica la importa en su propio tenant:
+- **Lo único compartido es `control`:** `share_packages` (HMAC del código y metadatos),
+  `share_events` e `inbox_notices`. Nunca hay datos clínicos, y los triggers impiden escribir
+  desde sesiones ajenas.
+- **El contenido** va cifrado en Storage bajo `transfer/{uuid}/`; la llave solo existe en el
+  código.
+- **La copia** se escribe con la sesión `TenantDb` de la doctora, bajo RLS de su tenant. El
+  reclamo y la confirmación usan una sesión de control sin contexto, que nunca lee `clinical`.
+- **Auditoría en ambos lados:** `share.create`/`share.revoke` en el tenant de la paciente y
+  `share.import` en el de la médica.
+
 ## 7 bis. Traspaso de pacientes entre médicas (ADR 0009, migración 0014)
 
 Las fichas de institución solo las ve su médica responsable. Si ella se va, la administración no
