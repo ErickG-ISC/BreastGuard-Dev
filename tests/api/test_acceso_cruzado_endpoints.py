@@ -88,6 +88,9 @@ PROTECTED = {
     # Médica (solo doctor)
     "doctor_list_handovers": ("GET", f"{API}/doctor/handovers", {}),
     "doctor_accept_handover": ("POST", f"{API}/doctor/handovers/{SOME_ID}/accept", {}),
+    "doctor_import_share": ("POST", f"{API}/doctor/shares/import", {"json": {"code": "x"}}),
+    "doctor_notices": ("GET", f"{API}/doctor/notices", {}),
+    "doctor_read_notice": ("POST", f"{API}/doctor/notices/{SOME_ID}/read", {}),
     # CU-01 (solo pacientes)
     "subscription_get": ("GET", f"{API}/subscription/me", {}),
     "subscription_put": ("PUT", f"{API}/subscription/me", {"json": {"plan_code": "plus"}}),
