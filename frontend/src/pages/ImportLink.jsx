@@ -31,6 +31,14 @@ export default function ImportLink() {
   const { user, loading } = useAuth();
   const [hasCode] = useState(captureCode);
 
+  if (!loading && user && user.role !== 'doctor') {
+    try {
+      sessionStorage.removeItem(PENDING_CODE_KEY);
+    } catch {
+      // nada que limpiar
+    }
+  }
+
   if (!loading && user?.role === 'doctor') return <Navigate to="/medico/importar" replace />;
 
   return (

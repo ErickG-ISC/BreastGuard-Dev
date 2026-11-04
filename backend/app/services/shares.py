@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from backend.app.content.share_consent import current_share_consent
@@ -42,6 +42,8 @@ DIARY_DAYS = 90
 MAX_BYTES = 25 * 1024 * 1024
 MAX_ACTIVE = 5
 CLEANUP_BATCH = 50
+# Un reclamo de importación más viejo que esto se considera abandonado (CU-08)
+STALE_CLAIM = timedelta(minutes=10)
 NOT_FOUND = "Paquete no encontrado"
 
 
@@ -441,8 +443,15 @@ def cleanup(db: Session, storage: SupabaseStorage) -> CleanupResult:
         db.scalars(
             update(SharePackage)
             .where(
-                SharePackage.status.in_(("activo", "importando")),
                 SharePackage.expires_at <= func.now(),
+                or_(
+                    SharePackage.status == "activo",
+                    # Una importación en curso termina; solo caduca un reclamo abandonado
+                    and_(
+                        SharePackage.status == "importando",
+                        SharePackage.claimed_at < func.now() - STALE_CLAIM,
+                    ),
+                ),
             )
             .values(status="caducado")
             .returning(SharePackage.id)

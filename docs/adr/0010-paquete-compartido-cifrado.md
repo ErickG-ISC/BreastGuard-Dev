@@ -123,10 +123,23 @@ tenant. Además, el servidor no debe poder leer lo compartido ni guardar el cód
 
     Crear un traspaso además avisa por correo a la médica de origen y a las demás administradoras
     (riesgo de una segunda cuenta de la misma persona, ADR 0009).
+    - **Contenido no confiable** (revisión de aislamiento): el contenido descifrado se valida
+      con `schemas/share_payload.py` antes de copiar nada. El esquema impone:
+      - tipos cerrados y sin campos extra;
+      - nombres de objeto `^[0-9a-f]{32}\.bin$`, nunca rutas;
+      - como máximo 10 análisis y nunca más que `analyses_count`;
+      - límites de longitud.
+
+      Cualquier error libera el reclamo y borra lo subido (502, nunca 500).
+    - **Confirmación:** `_confirm` solo confirma si el reclamo sigue siendo de quien importa.
+      La limpieza no caduca un reclamo de menos de 10 minutos.
+    - **Destinataria purgada:** si se purga su institución, `recipient_user_id` queda nulo y el
+      código sirve a cualquier doctora que lo tenga, hasta que caduque.
 13. **Frontend:**
     - `/importar` es pública: guarda el código del fragmento en `sessionStorage`, lo borra del
       historial y pide iniciar sesión;
     - `/medico` lleva a la médica a `/medico/importar` y muestra el aviso "tienes un paquete".
+   - el código pendiente se borra al cerrar sesión y si quien abre el enlace no es doctora.
 
 ## Consecuencias
 

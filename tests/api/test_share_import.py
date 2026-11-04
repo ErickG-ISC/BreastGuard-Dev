@@ -9,6 +9,7 @@
 - auditoría en ambos lados y evento `reasignado` cuando la ficha cambia de médica.
 """
 
+import json
 import threading
 import uuid
 from datetime import UTC, datetime
@@ -407,3 +408,96 @@ class TestTraspasoEndurecido:
         for message in outbox.messages:
             assert "paciente" in message.body.lower()  # el tema administrativo, sin nombres
             assert world["colleague"].email not in message.body
+
+
+class TestContenidoNoConfiable:
+    """Revisión de aislamiento: el contenido descifrado se valida antes de copiar nada."""
+
+    def _tamper(self, storage, owner_engine, code, change):
+        row = package_row(owner_engine)
+        secret = share_crypto.from_code(code)
+        name = row["object_prefix"] + "payload.bin"
+        payload = json.loads(
+            share_crypto.decrypt(secret.key, row["id"], "payload.bin", storage.objects[name])
+        )
+        change(payload)
+        storage.objects[name] = share_crypto.encrypt(
+            secret.key, row["id"], "payload.bin", json.dumps(payload).encode()
+        )
+
+    def _rejected(self, client, storage, owner_engine, world, package):
+        response = do_import(client, world["doctor"], package["code"])
+        assert response.status_code == 502
+        assert clinic_rows(owner_engine, world["clinic"].id, "patients") == []
+        assert objects_under(storage, "clinica-a/") == {}
+        row = package_row(owner_engine)
+        assert row["status"] == "activo" and row["claimed_by"] is None
+
+    @pytest.mark.parametrize(
+        "change",
+        [
+            lambda p: p["analyses"][0].update(image="../otro/x.bin"),
+            lambda p: p["analyses"][0].update(heatmap="b2c/images/x.png"),
+            lambda p: p.update(patient="no es un objeto"),
+            lambda p: p.update(analyses=["no es un objeto"]),
+            lambda p: p.update(extra="campo desconocido"),
+            lambda p: p["analyses"][0].update(predicted_class="inventada"),
+            lambda p: p["symptoms"][0].update(note="x" * 5000),
+            # Más análisis de los que la paciente declaró al compartir
+            lambda p: p["analyses"].append(dict(p["analyses"][0])),
+        ],
+        ids=[
+            "ruta_relativa",
+            "ruta_de_tenant",
+            "paciente_mal_formada",
+            "analisis_mal_formado",
+            "campo_extra",
+            "clase_inventada",
+            "nota_enorme",
+            "mas_analisis_de_los_declarados",
+        ],
+    )
+    def test_contenido_alterado_se_rechaza_sin_dejar_nada(
+        self, client, storage, owner_engine, world, change
+    ):
+        package = shared(client, world)
+        self._tamper(storage, owner_engine, package["code"], change)
+        self._rejected(client, storage, owner_engine, world, package)
+
+    def test_la_limpieza_no_caduca_una_importacion_en_curso(
+        self, client, owner_engine, world, monkeypatch
+    ):
+        monkeypatch.setenv("REMINDER_CRON_SECRET", "s" * 40)
+        package = shared(client, world)
+        lookup = share_crypto.from_code(package["code"]).lookup_hash
+
+        class Auth:
+            user_id = world["doctor"].id
+
+        with new_session() as control:
+            assert share_import._claim(control, Auth(), lookup) is not None
+        with owner_engine.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE control.share_packages SET created_at = now() - interval '2 days', "
+                    "expires_at = now() - interval '1 minute'"
+                )
+            )
+        result = client.post(f"{API}/internal/shares/cleanup", headers={"X-Cron-Secret": "s" * 40})
+        assert result.json()["expired"] == 0
+        assert package_row(owner_engine)["status"] == "importando"
+
+    def test_no_confirma_si_perdio_el_reclamo(self, client, owner_engine, world, monkeypatch):
+        package = shared(client, world)
+        real_copy = share_import._copy
+
+        def copy_then_lose_claim(*args, **kwargs):
+            result = real_copy(*args, **kwargs)
+            with owner_engine.begin() as conn:
+                conn.execute(text("UPDATE control.share_packages SET status = 'caducado'"))
+            return result
+
+        monkeypatch.setattr(share_import, "_copy", copy_then_lose_claim)
+        response = do_import(client, world["doctor"], package["code"])
+        assert response.status_code == 409
+        assert package_row(owner_engine)["status"] == "caducado"
