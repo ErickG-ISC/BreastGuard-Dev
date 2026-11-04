@@ -7,6 +7,8 @@ pydantic==2.14.1
 email-validator==2.3.0
 python-multipart==0.0.32
 python-jose[cryptography]==3.5.0
+# AES-GCM y HKDF del paquete compartido (CU-07); ya venía como dependencia de python-jose
+cryptography==50.0.2
 passlib==1.7.4
 # passlib 1.7.4 no es compatible con bcrypt >= 4.1; no subir sin cambiar passlib
 bcrypt==4.0.1

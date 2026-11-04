@@ -155,6 +155,17 @@ def compose_invitation(
     )
 
 
+def compose_share_notice(*, to: str) -> EmailMessage:
+    """Aviso a la médica de que tiene un paquete (CU-07): sin nombre de la paciente ni el tema."""
+    base = os.environ.get("PUBLIC_APP_URL", "http://localhost:5173").rstrip("/")
+    return EmailMessage(
+        to=to,
+        subject="Tienes un aviso nuevo",
+        body=f"Hola:\n\nTienes un aviso nuevo en tu cuenta. Entra para verlo: {base}/login",
+        from_name="BreastGuard",
+    )
+
+
 def compose(*, to: str, kind: str, discreet: bool, unsubscribe_url: str) -> EmailMessage:
     subject = DISCREET_SUBJECT if discreet else SUBJECTS[kind]
     body = DISCREET_BODY if discreet else BODIES[kind]

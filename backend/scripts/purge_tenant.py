@@ -46,6 +46,7 @@ class PurgeSummary:
     slug: str
     deleted: dict[str, int] = field(default_factory=dict)
     dry_run: bool = False
+    transfer_prefixes: list[str] = field(default_factory=list)
 
 
 def _require_bypass(conn: Connection) -> None:
@@ -127,6 +128,23 @@ def purge_tenant(
                 {"id": tenant.id},
             )
             summary.deleted["control.patient_handovers"] = result.rowcount
+            result = conn.execute(
+                text("DELETE FROM control.inbox_notices WHERE tenant_id = :id"), {"id": tenant.id}
+            )
+            summary.deleted["control.inbox_notices"] = result.rowcount
+            # Paquetes de sus pacientes (los eventos caen en cascada). Sus objetos cifrados viven
+            # bajo transfer/, fuera del prefijo del tenant: se borran junto con sus archivos.
+            prefixes = list(
+                conn.scalars(
+                    text(
+                        "DELETE FROM control.share_packages WHERE source_tenant_id = :id "
+                        "RETURNING object_prefix"
+                    ),
+                    {"id": tenant.id},
+                )
+            )
+            summary.deleted["control.share_packages"] = len(prefixes)
+            summary.transfer_prefixes = prefixes
             for table in ("reminder_notices", "reminders", "consents", "subscriptions"):
                 result = conn.execute(
                     text(
@@ -159,11 +177,14 @@ def purge_tenant(
     return summary
 
 
-def _purge_files(slug: str) -> int:
+def _purge_files(slug: str, transfer_prefixes: list[str]) -> int:
     from backend.app.services.storage import SupabaseStorage
 
     try:
-        removed = SupabaseStorage().remove_prefix(f"{slug}/")
+        storage = SupabaseStorage()
+        removed = storage.remove_prefix(f"{slug}/")
+        for prefix in transfer_prefixes:
+            removed += storage.remove_prefix(prefix)
     except Exception as exc:
         print(
             f"La base quedó purgada, pero falló Storage ({type(exc).__name__}). "
@@ -223,7 +244,7 @@ def main() -> int:
             for table, count in summary.deleted.items():
                 print(f"{verb} {count} filas de {table}")
             if not args.dry_run and not args.keep_files:
-                status = max(status, _purge_files(slug))
+                status = max(status, _purge_files(slug, summary.transfer_prefixes))
     finally:
         engine.dispose()
     return status
