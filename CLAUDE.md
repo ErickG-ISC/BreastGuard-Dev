@@ -161,6 +161,12 @@ Reglas de infraestructura:
   - Frontend: `/compartir` (Share, con QR) y `/compartidos` (MyShares).
   - Importación (CU-08, `services/share_import.py`): `POST /doctor/shares/import` (solo doctora). Reclamo atómico en control, descifrado en memoria y copia en el `TenantDb` de la doctora (ficha `importado`, ella responsable), luego confirmación (`importado`) y borrado de `transfer/`. Un fallo libera el reclamo; un reintento tras una caída no duplica (índice único `source_package_id`). 5 fallos por cuenta en 15 min y 5 ajenos por paquete (lo revocan). Avisos de la médica: `GET /doctor/notices` y `POST /doctor/notices/{id}/read`. Frontend: `/importar` (pública, guarda el código del fragmento) y `/medico/importar`.
   - Al aceptar un traspaso de fichas importadas se escribe `share_events.reasignado` (trigger de 0016); crear un traspaso avisa por correo a la médica de origen y a las demás `tenant_admin`.
+- Panel y caso de la médica (CU-11, CU-08, ADR 0012; `services/cases.py`, rutas en `api/v1/doctor.py`):
+  - `POST /doctor/patients/search` (el nombre buscado va en el cuerpo, nunca en la URL), `GET /doctor/patients/summary`, `GET /doctor/patients/{id}` (caso con URLs firmadas), `PATCH /doctor/patients/{id}/status`, `POST /doctor/patients/{id}/notes`, y `PATCH` y `DELETE /doctor/notes/{id}`. Filtro explícito `_visible` igual a la política, y 404 uniforme con `case.denied`.
+  - "Sospechoso": clase en `MLSettings.suspicious_classes` o marca `notable_malignant_probability` del último análisis (una sola fuente).
+  - 0017: trigger `enforce_case_status` (transiciones), `reviewed_by` y `reviewed_at` puestos por el trigger, un análisis nuevo devuelve el caso a pendiente, y notas que edita o borra solo su autora y que la paciente nunca ve.
+  - Frontend: `/medico` (Panel) y `/medico/pacientes/:id` (Case). La campana de la paciente incluye avisos `share_update` de sus paquetes.
+  - `backend/scripts/demo_flow.py`: escenario de demo por el flujo real (solo cuentas `demo-paciente-…@example.com` y tenants `demo-…`).
 - `api/v1/images.py`: `POST /upload` (paciente), `GET /images` y `GET /images/{id}` (con URL firmada; ajena o inexistente da el mismo 404). Lecturas, subidas y accesos denegados (`image.denied`) auditados.
 - `api/v1/audit.py`: `GET /audit` para `tenant_admin` con filtros `from`, `to`, `actor_id`, `limit` y `offset`.
 - `api/rate_limit.py`: límites por IP y ruta: `/auth/token` 10/min, `/auth/register` 5/min, `/images/upload` 20/min. La IP sale de `api/client_ip.py`: ignora `X-Forwarded-For` salvo con `TRUSTED_PROXY_HOPS` (en Render, `1`; ver ADR 0004).
@@ -180,7 +186,7 @@ SPA estándar: `main.jsx` monta `App.jsx` (tema, `AuthProvider` y rutas con `rea
 - `api/client.js`: axios con el Bearer del JWT, guardado en `sessionStorage`; un 401 cierra la sesión.
 - `auth/AuthContext.jsx`: login (`/auth/token`) y el usuario actual (`/auth/me`).
 - `components/ProtectedRoute.jsx` (por rol) y `components/Layout.jsx`, con el aviso de herramienta de apoyo.
-- Rutas públicas: `/`, `/login`, `/registro`. Paciente: `/paciente`, `/cuestionario`, `/analizar`, `/resultado/:id`, `/historial`, `/diario`, `/mas`, `/autoexploracion`, `/recordatorios`, `/informacion`, `/informacion/:slug`. Públicas: `/baja` (confirmar baja del correo) e `/invitacion` (fijar contraseña con el enlace).
+- Rutas públicas: `/`, `/login`, `/registro`, `/importar`. Médica: `/medico` (panel), `/medico/pacientes/:id` (caso) y `/medico/importar`. Paciente: `/paciente`, `/cuestionario`, `/analizar`, `/resultado/:id`, `/historial`, `/diario`, `/mas`, `/autoexploracion`, `/recordatorios`, `/informacion`, `/informacion/:slug`. Públicas: `/baja` (confirmar baja del correo) e `/invitacion` (fijar contraseña con el enlace).
 - `components/AdminShell.jsx` (barra lateral D04, cajón en móvil) y `components/admin/` (`StaffManager`, `EventsLog`, `IsolationDialog`), compartidos por:
   - `platform_admin`: `/admin/tenants`, `/admin/tenants/:id` (datos, usuarios, bitácora, chequeo, desactivar y solicitar purga) y `/admin/auditoria`;
   - `tenant_admin`: `/institucion/usuarios` y `/institucion/bitacora`.
