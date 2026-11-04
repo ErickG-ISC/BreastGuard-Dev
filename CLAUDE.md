@@ -153,6 +153,12 @@ Reglas de infraestructura:
   - FKs con `patient_id`: `analyses → medical_images` y `analysis_reviews → analyses` (las FKs no pasan por RLS).
   - `clinical.case_notes` (solo inserción, autora = la doctora del contexto) y `clinical.analysis_reviews` (BI-RADS y recomendación **de la médica**, una por análisis). `analyses.profile` (`ecografia_b2c | mastografia_prototipo`) y `dicom_meta`.
   - Toda tabla clínica nueva con `patient_id` usa `add_clinical_access_policy` y su receta en `tests/isolation/test_rls_por_tabla.py`; `tests/isolation/test_acceso_clinico_por_rol.py` prueba doctora contra doctora y la ausencia de acceso de los admins.
+- `api/v1/shares.py` + `services/shares.py` + `services/share_crypto.py` (CU-07, ADR 0010, solo pacientes): `GET /shares/consent`, `POST /shares` (5/min), `GET /shares` y `DELETE /shares/{id}` (revocar).
+  - Código de 128 bits (26 caracteres Crockford) que solo ve la paciente; HKDF deriva la llave AES-256-GCM y el id de búsqueda. En `control.share_packages` solo va `HMAC(SECRET_KEY, id)` y metadatos. Enlace `PUBLIC_APP_URL/importar#c=` (fragmento).
+  - Contenido cifrado en Storage bajo `transfer/{uuid}/` (slug reservado); solo rutas de las filas propias con prefijo `{slug}/`. Máximo 10 análisis, 25 MB y 5 activos.
+  - Tablas `control.share_packages`, `share_events` e `inbox_notices` (0015), sin datos clínicos. El trigger `enforce_share_writes` solo deja crear o revocar a la paciente en su contexto.
+  - `POST /internal/shares/cleanup` (mismo `X-Cron-Secret`): caduca y borra el contenido; lo llama `reminders.yml`.
+  - Frontend: `/compartir` (Share, con QR) y `/compartidos` (MyShares).
 - `api/v1/images.py`: `POST /upload` (paciente), `GET /images` y `GET /images/{id}` (con URL firmada; ajena o inexistente da el mismo 404). Lecturas, subidas y accesos denegados (`image.denied`) auditados.
 - `api/v1/audit.py`: `GET /audit` para `tenant_admin` con filtros `from`, `to`, `actor_id`, `limit` y `offset`.
 - `api/rate_limit.py`: límites por IP y ruta: `/auth/token` 10/min, `/auth/register` 5/min, `/images/upload` 20/min. La IP sale de `api/client_ip.py`: ignora `X-Forwarded-For` salvo con `TRUSTED_PROXY_HOPS` (en Render, `1`; ver ADR 0004).

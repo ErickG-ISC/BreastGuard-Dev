@@ -25,6 +25,8 @@ import InstitutionUsers from './pages/institution/Users';
 import InstitutionLog from './pages/institution/Log';
 import AcceptInvitation from './pages/AcceptInvitation';
 import DoctorHome from './pages/doctor/DoctorHome';
+import Share from './pages/patient/Share';
+import MyShares from './pages/patient/MyShares';
 import AdminShell from './components/AdminShell';
 import { BusinessIcon, HomeIcon, LogIcon, PeopleIcon } from './components/icons';
 import theme from './theme';
@@ -104,6 +106,8 @@ function App() {
               <Route path="/recordatorios" element={<Reminders />} />
               <Route path="/informacion" element={<Blog />} />
               <Route path="/informacion/:slug" element={<BlogArticle />} />
+              <Route path="/compartir" element={<Share />} />
+              <Route path="/compartidos" element={<MyShares />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

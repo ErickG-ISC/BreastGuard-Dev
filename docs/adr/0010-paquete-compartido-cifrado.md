@@ -1,0 +1,88 @@
+# ADR 0010: Paquete compartido cifrado (CU-07)
+
+- Estado: aceptado (la parte de crear, listar, revocar y caducar; la importación llega con CU-08)
+- Fecha: 2026-11-04
+- Casos de uso: CU-07 (compartir con la médica) y CU-08 (importar)
+
+## Contexto
+
+La paciente B2C y su médica viven en tenants distintos. Compartir no puede abrir ninguna política
+entre tenants (ADR 0002): la paciente genera una **copia** que la médica importa en su propio
+tenant. Además, el servidor no debe poder leer lo compartido ni guardar el código que lo abre.
+
+## Decisiones
+
+1. **Código como llave.**
+   - 16 bytes aleatorios (128 bits) en base32 Crockford: 26 caracteres en grupos (5-5-5-5-6).
+     Al leerlo se ignoran guiones, espacios y mayúsculas, y se aceptan O/I/L por 0/1.
+   - Con HKDF-SHA256 se derivan dos valores independientes: la llave AES-256-GCM y un
+     identificador de búsqueda.
+   - El servidor guarda solo `HMAC-SHA256(SECRET_KEY, identificador)` en
+     `control.share_packages.key_hash`, con índice único.
+   - El código no se guarda, no se registra en logs y se devuelve **una sola vez**
+     (`Cache-Control: no-store`).
+   - El enlace es `PUBLIC_APP_URL/importar#c=CÓDIGO`. Como va en el fragmento, nunca llega al
+     servidor, a los logs ni al Referer. El QR (`qrcode`, en el navegador) codifica ese enlace.
+2. **Contenido cifrado en Storage privado** bajo `transfer/{uuid}/` (`transfer` es un slug
+   reservado).
+   - Cada imagen y cada heatmap va como un objeto `{uuid}.bin`, y el contenido JSON como
+     `payload.bin`.
+   - Cada objeto lleva un nonce aleatorio y, como datos asociados (AAD), el id del paquete y su
+     nombre: no se puede mover un archivo a otro paquete ni renombrarlo.
+3. **Solo objetos propios.**
+   - El paquete se arma con la sesión `TenantDb` de la paciente, bajo RLS y con el filtro de
+     pertenencia (`patient_id` de su ficha).
+   - Las rutas de Storage salen de sus filas, nunca del cliente, y deben empezar por `{su_slug}/`.
+   - Un análisis ajeno o inexistente da el mismo 422.
+   - Límites: como máximo 10 análisis, 25 MB, 5 paquetes activos por paciente y 5 peticiones por
+     minuto.
+4. **Qué se comparte lo elige ella:**
+   - análisis;
+   - diario y autoexploraciones de 90 días;
+   - último cuestionario;
+   - opcionalmente sus notas escritas;
+   - opcionalmente nombre y edad. La edad es la del cuestionario con su fecha, nunca la fecha de
+     nacimiento.
+
+   En `share_packages.sections` solo quedan booleanos.
+5. **Control sin datos clínicos** (migración 0015):
+   - `share_packages`: estado, caducidad (24 h, 3 o 7 días; un CHECK impone el máximo de 7 días),
+     destinataria opcional, consentimiento (versión y sha256), prefijo, intentos fallidos y quién
+     importó;
+   - `share_events`: lo que ve la paciente (creado, revocado, caducado, importado, reasignado),
+     con nombres de institución y médica, nunca contenido;
+   - `inbox_notices`: avisos internos con tipo e id.
+6. **Defensa en la base.** `control` no tiene RLS y `app_user` también es el rol de las sesiones
+   clínicas, así que el trigger `control.enforce_share_writes` asegura:
+   - con contexto de paciente solo se crean paquetes **a su nombre** y empiezan activos;
+   - en su contexto, la paciente solo puede revocar los suyos;
+   - ninguna sesión con contexto de doctora o administración toca paquetes;
+   - la importación y la limpieza usan sesiones de control sin contexto.
+7. **Destinataria opcional y sin revelar cuentas.**
+   - Si el correo es de una doctora activa de una institución activa, se guarda su id: recibe un
+     aviso interno y un correo discreto, sin nombre de la paciente ni tema.
+   - En cualquier otro caso, la respuesta es idéntica.
+8. **Revocar y caducar.**
+   - La paciente revoca un paquete activo, y su contenido se borra de inmediato.
+   - `POST /internal/shares/cleanup` usa el mismo secreto del despachador y la sesión de control.
+     Caduca lo vencido y borra el contenido de lo revocado, caducado o importado; si Storage
+     falla, lo reintenta en la siguiente corrida.
+   - Lo llama `reminders.yml` cada 15 minutos.
+9. **Consentimiento del paquete** (`content/share_consent_v1.md`, BORRADOR):
+   - nombra como custodia a la **institución** de la médica que importa, no a "la Dra. X";
+   - avisa que la institución puede asignar el caso a otra médica (traspaso, ADR 0009);
+   - avisa que la copia importada no se retira desde BreastGuard.
+
+   Así el texto coincide con el comportamiento real. Cada cambio de médica se verá en
+   "Mis paquetes" como un evento `reasignado`, que llega con la importación.
+
+## Consecuencias
+
+- Con acceso a la base, sin el código, el contenido no se puede descifrar. Sin `SECRET_KEY`
+  tampoco se pueden probar códigos contra el hash.
+- El código es un secreto al portador: quien lo tenga y sea doctora puede importarlo si no hay
+  destinataria. Lo mitigan la caducidad corta, el uso único y la revocación.
+- La purga de un tenant borra sus paquetes y el contenido de `transfer/` de cada uno.
+- `cryptography` queda fijada explícitamente (ya venía con `python-jose`).
+- Pendiente para la rama de importación: el reclamo atómico, el descifrado y la copia en el
+  tenant de la médica, el límite de intentos fallidos y los eventos `importado` y `reasignado`.
