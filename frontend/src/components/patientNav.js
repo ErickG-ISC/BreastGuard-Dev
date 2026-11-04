@@ -8,6 +8,7 @@ import {
   QuestionnaireIcon,
   ReminderIcon,
   SelfExamIcon,
+  ShareIcon,
 } from './icons';
 
 // Secciones principales: barra inferior en móvil y primera parte de la barra lateral
@@ -21,6 +22,7 @@ export const PRIMARY_NAV = [
 
 // Secciones de "Más": página propia en móvil, visibles directo en la barra lateral de escritorio
 export const SECONDARY_NAV = [
+  { label: 'Compartir con mi médica', to: '/compartidos', icon: ShareIcon, also: ['/compartir'] },
   { label: 'Autoexploración', to: '/autoexploracion', icon: SelfExamIcon },
   { label: 'Recordatorios', to: '/recordatorios', icon: ReminderIcon },
   { label: 'Información', to: '/informacion', icon: InfoIcon },

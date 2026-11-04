@@ -153,6 +153,15 @@ PROTECTED = {
     "reminders_delete": ("DELETE", f"{API}/reminders/self_exam", {}),
     "notices_list": ("GET", f"{API}/notices", {}),
     "notices_read": ("POST", f"{API}/notices/{SOME_ID}/read", {}),
+    # CU-07 (solo pacientes)
+    "shares_consent": ("GET", f"{API}/shares/consent", {}),
+    "shares_create": (
+        "POST",
+        f"{API}/shares",
+        {"json": {"include_diary": True, "consent_accepted": True, "consent_version": "x"}},
+    ),
+    "shares_list": ("GET", f"{API}/shares", {}),
+    "shares_revoke": ("DELETE", f"{API}/shares/{SOME_ID}", {}),
 }
 PATIENT_ONLY_ENDPOINTS = [
     "subscription_get",
@@ -180,6 +189,10 @@ PATIENT_ONLY_ENDPOINTS = [
     "reminders_delete",
     "notices_list",
     "notices_read",
+    "shares_consent",
+    "shares_create",
+    "shares_list",
+    "shares_revoke",
 ]
 ADMIN_ENDPOINTS = [name for name in PROTECTED if name.startswith("admin_")]
 DOCTOR_ONLY_ENDPOINTS = [name for name in PROTECTED if name.startswith("doctor_")]

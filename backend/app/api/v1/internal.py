@@ -11,11 +11,12 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 
-from backend.app.api.deps import ControlDb, get_email_sender
+from backend.app.api.deps import ControlDb, Storage, get_email_sender
 from backend.app.api.rate_limit import rate_limit
 from backend.app.schemas.reminders import DispatchOut
+from backend.app.schemas.shares import CleanupOut
 from backend.app.services import email as email_service
-from backend.app.services import reminders
+from backend.app.services import reminders, shares
 
 router = APIRouter()
 
@@ -48,3 +49,20 @@ def dispatch_reminders(
 ):
     result = reminders.dispatch(db, sender)
     return DispatchOut(claimed=result.claimed, emailed=result.emailed, failed=result.failed)
+
+
+@router.post(
+    "/internal/shares/cleanup",
+    response_model=CleanupOut,
+    dependencies=[
+        Depends(rate_limit("shares_cleanup", 6, 60)),
+        Depends(require_cron_secret),
+    ],
+)
+def cleanup_shares(db: ControlDb, storage: Storage):
+    """Caduca paquetes vencidos y borra el contenido cifrado de los cerrados (CU-07).
+
+    Mismo secreto y misma sesión de control que el despachador: nunca lee `clinical`.
+    """
+    result = shares.cleanup(db, storage)
+    return CleanupOut(expired=result.expired, purged=result.purged, failed=result.failed)

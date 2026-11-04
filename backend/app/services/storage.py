@@ -56,6 +56,14 @@ class SupabaseStorage:
             logger.error("Fallo al subir un objeto a Storage (%s)", type(exc).__name__)
             raise StorageError from exc
 
+    def download_bytes(self, object_name: str) -> bytes:
+        """Contenido de un objeto (copiar al paquete compartido, CU-07)."""
+        try:
+            return self._bucket().download(object_name)
+        except Exception as exc:
+            logger.error("Fallo al descargar un objeto de Storage (%s)", type(exc).__name__)
+            raise StorageError from exc
+
     def remove_objects(self, object_names: list[str]) -> None:
         """Borra objetos concretos (eliminación de un análisis)."""
         try:
@@ -79,9 +87,10 @@ class SupabaseStorage:
         return bool(_get_client().storage.get_bucket(self.bucket).public)
 
     def remove_prefix(self, prefix: str) -> int:
-        """Borra todos los objetos bajo un prefijo de tenant (`{slug}/`). Solo para la purga."""
-        if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,40}/", prefix):
-            raise ValueError("El prefijo debe ser exactamente '{slug}/'")
+        """Borra todos los objetos bajo `{slug}/` (purga) o `transfer/{uuid}/` (paquete, CU-07)."""
+        tenant_prefix = re.fullmatch(r"[a-z0-9][a-z0-9-]{1,40}/", prefix) and prefix != "transfer/"
+        if not (tenant_prefix or re.fullmatch(r"transfer/[0-9a-f]{32}/", prefix)):
+            raise ValueError("El prefijo debe ser '{slug}/' o 'transfer/{uuid}/'")
         bucket = self._bucket()
         paths: list[str] = []
         pending = [prefix.rstrip("/")]

@@ -6,7 +6,18 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, mo
 
 SLUG_PATTERN = r"^[a-z0-9][a-z0-9-]{1,40}$"
 # Prefijos de Storage o nombres que no pueden ser de un tenant institucional
-RESERVED_SLUGS = {"b2c", "uploads", "admin", "api", "legacy", "public", "control", "clinical"}
+RESERVED_SLUGS = {
+    "b2c",
+    "uploads",
+    "admin",
+    "api",
+    "legacy",
+    "public",
+    "control",
+    "clinical",
+    # Prefijo de Storage de los paquetes compartidos (CU-07)
+    "transfer",
+}
 STAFF_PASSWORD_MIN = 12
 # Planes de institución (simulados: no hay facturación)
 TenantPlan = Literal["basic", "pro", "enterprise"]

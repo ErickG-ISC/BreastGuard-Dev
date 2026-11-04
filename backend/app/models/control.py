@@ -4,6 +4,7 @@ import uuid
 from datetime import date, datetime, time
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     Date,
@@ -33,6 +34,8 @@ class Tenant(Base):
         UniqueConstraint("slug", name="uq_tenants_slug"),
         CheckConstraint("kind IN ('b2c', 'institucion')", name="ck_tenants_kind"),
         CheckConstraint("slug ~ '^[a-z0-9][a-z0-9-]{1,40}$'", name="ck_tenants_slug"),
+        # Prefijo de Storage de los paquetes compartidos (0015)
+        CheckConstraint("slug <> 'transfer'", name="ck_tenants_slug_not_reserved"),
         {"schema": "control"},
     )
 
@@ -320,6 +323,135 @@ class PatientHandover(Base):
     patients_moved: Mapped[int | None] = mapped_column(Integer)
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cancelled_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+
+
+class SharePackage(Base):
+    """Paquete compartido por una paciente (CU-07, 0015). Solo metadatos: nunca datos clínicos.
+
+    El contenido está cifrado en Storage (`object_prefix`); la llave solo existe en el código
+    que tiene la paciente. Aquí se guarda únicamente `HMAC(SECRET_KEY, id de búsqueda)`.
+    """
+
+    __tablename__ = "share_packages"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["source_tenant_id", "source_user_id"],
+            ["control.users.tenant_id", "control.users.id"],
+            name="fk_share_packages_source",
+        ),
+        ForeignKeyConstraint(
+            ["recipient_user_id"],
+            ["control.users.id"],
+            name="fk_share_packages_recipient",
+            ondelete="SET NULL",
+        ),
+        UniqueConstraint("key_hash", name="uq_share_packages_key_hash"),
+        UniqueConstraint("object_prefix", name="uq_share_packages_prefix"),
+        CheckConstraint(
+            "status IN ('activo', 'importando', 'importado', 'revocado', 'caducado')",
+            name="ck_share_packages_status",
+        ),
+        CheckConstraint("char_length(key_hash) = 64", name="ck_share_packages_key_hash"),
+        CheckConstraint(
+            "object_prefix = 'transfer/' || replace(id::text, '-', '') || '/'",
+            name="ck_share_packages_prefix",
+        ),
+        CheckConstraint("analyses_count BETWEEN 0 AND 10", name="ck_share_packages_analyses_count"),
+        CheckConstraint(
+            "expires_at <= created_at + interval '7 days'", name="ck_share_packages_expiry"
+        ),
+        CheckConstraint(
+            "recipient_email IS NULL OR recipient_email = lower(recipient_email)",
+            name="ck_share_packages_recipient_lower",
+        ),
+        Index("ix_share_packages_source", "source_tenant_id", "source_user_id", "created_at"),
+        Index("ix_share_packages_status_expiry", "status", "expires_at"),
+        {"schema": "control"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    source_tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    source_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    key_hash: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, server_default=text("'activo'"))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    recipient_email: Mapped[str | None] = mapped_column(Text)
+    recipient_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    sections: Mapped[dict] = mapped_column(JSONB)
+    analyses_count: Mapped[int] = mapped_column(SmallInteger)
+    size_bytes: Mapped[int] = mapped_column(BigInteger)
+    consent_version: Mapped[str] = mapped_column(Text)
+    consent_sha256: Mapped[str] = mapped_column(Text)
+    consented_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    object_prefix: Mapped[str] = mapped_column(Text)
+    objects_deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    failed_attempts: Mapped[int] = mapped_column(SmallInteger, server_default=text("0"))
+    claimed_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    imported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    imported_tenant_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ShareEvent(Base):
+    """Lo que la paciente ve de su paquete. Solo inserción; nombres, nunca datos clínicos."""
+
+    __tablename__ = "share_events"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["package_id"],
+            ["control.share_packages.id"],
+            name="fk_share_events_package",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint(
+            "kind IN ('creado', 'revocado', 'caducado', 'importado', 'intento_fallido', "
+            "'reasignado')",
+            name="ck_share_events_kind",
+        ),
+        Index("ix_share_events_package", "package_id", "occurred_at"),
+        {"schema": "control"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    package_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    kind: Mapped[str] = mapped_column(Text)
+    institution_name: Mapped[str | None] = mapped_column(Text)
+    doctor_name: Mapped[str | None] = mapped_column(Text)
+
+
+class InboxNotice(Base):
+    """Aviso interno (p. ej. "tienes un paquete"): solo tipo e id de referencia."""
+
+    __tablename__ = "inbox_notices"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "user_id"],
+            ["control.users.tenant_id", "control.users.id"],
+            name="fk_inbox_notices_user",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint("kind IN ('share_received', 'share_update')", name="ck_inbox_notices_kind"),
+        Index("ix_inbox_notices_user", "user_id", "created_at"),
+        {"schema": "control"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    kind: Mapped[str] = mapped_column(Text)
+    ref_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class AdminEvent(Base):

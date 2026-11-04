@@ -91,6 +91,9 @@ def _clean_tables(request):
         conn.execute(text("DELETE FROM control.admin_events"))
         conn.execute(text("DELETE FROM control.invitations"))
         conn.execute(text("DELETE FROM control.patient_handovers"))
+        conn.execute(text("DELETE FROM control.inbox_notices"))
+        conn.execute(text("DELETE FROM control.share_events"))
+        conn.execute(text("DELETE FROM control.share_packages"))
         conn.execute(text("DELETE FROM control.reminder_notices"))
         conn.execute(text("DELETE FROM control.reminders"))
         conn.execute(text("DELETE FROM control.subscriptions"))
@@ -112,6 +115,7 @@ class FakeStorage:
         self.fail_remove = False
         self.fail_on: str | None = None
         self.fail_sign = False
+        self.fail_download = False
 
     def upload_file(self, file_path: str, object_name: str, content_type: str) -> None:
         self.uploaded_from.append(file_path)
@@ -124,6 +128,20 @@ class FakeStorage:
         if self.fail or (self.fail_on and self.fail_on in object_name):
             raise StorageError
         self.objects[object_name] = data
+
+    def download_bytes(self, object_name: str) -> bytes:
+        if self.fail_download or object_name not in self.objects:
+            raise StorageError
+        return self.objects[object_name]
+
+    def remove_prefix(self, prefix: str) -> int:
+        if self.fail_remove:
+            raise StorageError
+        names = [name for name in self.objects if name.startswith(prefix)]
+        for name in names:
+            del self.objects[name]
+        self.removed.extend(names)
+        return len(names)
 
     def remove_objects(self, object_names: list[str]) -> None:
         if self.fail_remove:

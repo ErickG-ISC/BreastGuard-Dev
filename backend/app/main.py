@@ -23,6 +23,7 @@ from backend.app.api.v1 import (
     onboarding,
     reminders,
     self_exams,
+    shares,
     symptoms,
 )
 from backend.app.cors import parse_origins
@@ -94,6 +95,7 @@ app.include_router(reminders.router, prefix="/api/v1")
 app.include_router(internal.router, prefix="/api/v1")
 app.include_router(blog.router, prefix="/api/v1")
 app.include_router(doctor.router, prefix="/api/v1/doctor")
+app.include_router(shares.router, prefix="/api/v1/shares")
 
 
 @app.get("/")

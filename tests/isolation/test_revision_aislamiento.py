@@ -35,7 +35,10 @@ PUBLIC_ROUTES = {
     ("GET", "/api/v1/blog/{slug}"),
 }
 # Autenticadas con un secreto compartido, no con JWT (tests/api/test_dispatcher.py)
-SECRET_ROUTES = {("POST", "/api/v1/internal/reminders/dispatch")}
+SECRET_ROUTES = {
+    ("POST", "/api/v1/internal/reminders/dispatch"),
+    ("POST", "/api/v1/internal/shares/cleanup"),
+}
 # Guarda contra un falso verde: si la enumeración de rutas deja de funcionar, esto falla
 MIN_EXPECTED_ROUTES = 20
 

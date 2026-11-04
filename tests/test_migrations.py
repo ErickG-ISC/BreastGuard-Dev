@@ -31,6 +31,9 @@ CONTROL_TABLES = {
     "reminders",
     "reminder_notices",
     "patient_handovers",
+    "share_packages",
+    "share_events",
+    "inbox_notices",
 }
 CLINICAL_TABLES = {
     "patients",
