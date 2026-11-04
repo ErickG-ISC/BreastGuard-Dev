@@ -70,6 +70,7 @@ class Patient(Base):
         ),
         Index("ix_patients_doctor_status", "tenant_id", "responsible_doctor_id", "status"),
         Index("ix_patients_user", "tenant_id", "user_id"),
+        Index("ix_patients_doctor_created", "tenant_id", "responsible_doctor_id", "created_at"),
         Index(
             "ux_patients_source_package",
             "tenant_id",
@@ -93,6 +94,9 @@ class Patient(Base):
     age_recorded_on: Mapped[date | None] = mapped_column(Date)
     # Paquete del que se importó (sin FK a control: no hay referencias entre esquemas)
     source_package_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    # Los fija el trigger de 0017 al marcar revisado (y los borra al reabrir)
+    reviewed_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -321,7 +325,7 @@ class SymptomEntry(Base):
 
 
 class CaseNote(Base):
-    """Nota de la médica sobre una paciente (CU-08). Solo inserción: corregir es otra nota."""
+    """Nota de la médica sobre una paciente (CU-08). Solo su autora la edita o la borra (0017)."""
 
     __tablename__ = "case_notes"
     __table_args__ = (
@@ -341,6 +345,7 @@ class CaseNote(Base):
     author_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
     body: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class AnalysisReview(Base):
