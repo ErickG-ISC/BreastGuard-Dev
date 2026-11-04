@@ -8,6 +8,7 @@ Dos pasos, para que la administración nunca toque datos clínicos:
    traspaso se cierra, con auditoría clínica y bitácora de plataforma en la misma transacción.
 """
 
+import logging
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -17,12 +18,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased
 
 from backend.app.models.clinical import Patient
-from backend.app.models.control import PatientHandover, User
+from backend.app.models.control import PatientHandover, ShareEvent, SharePackage, Tenant, User
 from backend.app.schemas.handovers import HandoverCreate, HandoverOut, PendingHandoverOut
 from backend.app.services import admin_events, audit
+from backend.app.services import email as email_service
 from backend.app.services.auth import AuthContext
 from backend.app.services.tenants import ConflictError, InvalidOperationError, NotFoundError
 from backend.app.services.user_admin import Scope, _staff_in_scope, _tenant_in_scope
+
+logger = logging.getLogger(__name__)
 
 
 def _pending():
@@ -85,8 +89,40 @@ def _rows(db: Session, *where) -> list[_Row]:
     return [_Row(h, f, t) for h, f, t in db.execute(query)]
 
 
+def _notify_created(
+    db: Session, scope: Scope, source: User, sender: email_service.EmailSender | None
+) -> None:
+    """Avisa a la médica de origen y a las demás administradoras activas del tenant.
+
+    Así un traspaso hacia una cuenta propia de quien administra no pasa inadvertido.
+    """
+    if sender is None:
+        return
+    others = db.scalars(
+        select(User).where(
+            User.tenant_id == source.tenant_id,
+            User.role == "tenant_admin",
+            User.is_active.is_(True),
+            User.id != scope.actor.user_id,
+        )
+    ).all()
+    recipients = {u.email for u in others}
+    if source.is_active and source.id != scope.actor.user_id:
+        recipients.add(source.email)
+    for to in sorted(recipients):
+        try:
+            sender.send(email_service.compose_handover_notice(to=to))
+        except Exception as exc:  # el traspaso ya quedó; el correo es informativo
+            logger.warning("No se pudo enviar el aviso de traspaso (%s)", type(exc).__name__)
+
+
 def create(
-    db: Session, scope: Scope, from_id: uuid.UUID, data: HandoverCreate, ip: str | None
+    db: Session,
+    scope: Scope,
+    from_id: uuid.UUID,
+    data: HandoverCreate,
+    ip: str | None,
+    sender: email_service.EmailSender | None = None,
 ) -> HandoverOut:
     source, _tenant = _staff_in_scope(db, scope, from_id, lock=True)
     target, _ = _staff_in_scope(db, scope, data.to_user_id)
@@ -140,7 +176,9 @@ def create(
         raise ConflictError("Ya hay un traspaso pendiente de esta persona") from None
     _event(db, scope, "handover.create", handover, ip)
     db.commit()
-    return to_out(_Row(handover, source.full_name, target.full_name))
+    out = to_out(_Row(handover, source.full_name, target.full_name))
+    _notify_created(db, scope, source, sender)
+    return out
 
 
 def list_for_tenant(db: Session, scope: Scope, tenant_id: uuid.UUID) -> list[HandoverOut]:
@@ -198,6 +236,21 @@ def accept(db: Session, auth: AuthContext, handover_id: uuid.UUID, ip: str | Non
         # Ajeno, de otra médica, ya cerrado o inexistente: misma respuesta
         raise NotFoundError
     now = datetime.now(UTC)
+    # Fichas importadas que cambian de médica: la paciente de origen lo verá (CU-07)
+    packages = list(
+        db.scalars(
+            select(SharePackage.id).where(
+                SharePackage.imported_tenant_id == auth.tenant_id,
+                SharePackage.id.in_(
+                    select(Patient.source_package_id).where(
+                        Patient.tenant_id == auth.tenant_id,
+                        Patient.responsible_doctor_id == handover.from_doctor_id,
+                        Patient.source_package_id.is_not(None),
+                    )
+                ),
+            )
+        )
+    )
     # RLS: solo ve (y solo puede dejar a su nombre) las fichas del traspaso hacia ella
     moved = db.execute(
         update(Patient)
@@ -209,6 +262,18 @@ def accept(db: Session, auth: AuthContext, handover_id: uuid.UUID, ip: str | Non
         .execution_options(synchronize_session=False)
     ).rowcount
     handover.accepted_at, handover.patients_moved = now, moved
+    if packages:
+        institution = db.get(Tenant, auth.tenant_id).name
+        doctor = db.get(User, auth.user_id).full_name
+        for package_id in packages:
+            db.add(
+                ShareEvent(
+                    package_id=package_id,
+                    kind="reasignado",
+                    institution_name=institution,
+                    doctor_name=doctor,
+                )
+            )
     audit.record(
         db,
         tenant_id=auth.tenant_id,

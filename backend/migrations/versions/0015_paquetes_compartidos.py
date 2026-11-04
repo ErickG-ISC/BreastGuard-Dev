@@ -37,6 +37,46 @@ STATUSES = ("activo", "importando", "importado", "revocado", "caducado")
 EVENT_KINDS = ("creado", "revocado", "caducado", "importado", "intento_fallido", "reasignado")
 NOTICE_KINDS = ("share_received", "share_update")
 
+# Con contexto, eventos y avisos solo de la paciente sobre SUS paquetes (0016 la amplía)
+SIDE_WRITES_SQL = """
+        CREATE OR REPLACE FUNCTION control.enforce_share_side_writes() RETURNS trigger
+        LANGUAGE plpgsql AS $$
+        DECLARE
+          ctx_role text := NULLIF(current_setting('app.role', true), '');
+          me uuid := clinical.current_user_id();
+        BEGIN
+          IF ctx_role IS NULL THEN
+            RETURN NEW;
+          END IF;
+          IF TG_TABLE_NAME = 'share_events' THEN
+            IF ctx_role <> 'patient' OR NEW.kind NOT IN ('creado', 'revocado')
+               OR NEW.institution_name IS NOT NULL OR NEW.doctor_name IS NOT NULL
+               OR NOT EXISTS (
+                 SELECT 1 FROM control.share_packages p WHERE p.id = NEW.package_id
+                   AND p.source_user_id = me
+                   AND p.source_tenant_id = clinical.current_tenant_id()) THEN
+              RAISE EXCEPTION 'Evento de paquete no permitido desde esta sesión';
+            END IF;
+            RETURN NEW;
+          END IF;
+          -- inbox_notices
+          IF TG_OP = 'UPDATE' THEN
+            IF OLD.user_id IS DISTINCT FROM me THEN
+              RAISE EXCEPTION 'Solo la destinataria marca sus avisos';
+            END IF;
+            RETURN NEW;
+          END IF;
+          IF ctx_role <> 'patient' OR NEW.kind <> 'share_received' OR NOT EXISTS (
+               SELECT 1 FROM control.share_packages p WHERE p.id = NEW.ref_id
+                 AND p.source_user_id = me
+                 AND p.source_tenant_id = clinical.current_tenant_id()
+                 AND p.recipient_user_id = NEW.user_id) THEN
+            RAISE EXCEPTION 'Aviso no permitido desde esta sesión';
+          END IF;
+          RETURN NEW;
+        END $$
+        """
+
 
 def _in(values: tuple[str, ...]) -> str:
     return ", ".join(f"'{v}'" for v in values)
@@ -231,46 +271,7 @@ def upgrade() -> None:
         "ON control.share_packages FOR EACH ROW EXECUTE FUNCTION control.enforce_share_writes()"
     )
     # Eventos y avisos: con contexto, solo los de la paciente sobre SUS paquetes
-    op.execute(
-        """
-        CREATE OR REPLACE FUNCTION control.enforce_share_side_writes() RETURNS trigger
-        LANGUAGE plpgsql AS $$
-        DECLARE
-          ctx_role text := NULLIF(current_setting('app.role', true), '');
-          me uuid := clinical.current_user_id();
-        BEGIN
-          IF ctx_role IS NULL THEN
-            RETURN NEW;
-          END IF;
-          IF TG_TABLE_NAME = 'share_events' THEN
-            IF ctx_role <> 'patient' OR NEW.kind NOT IN ('creado', 'revocado')
-               OR NEW.institution_name IS NOT NULL OR NEW.doctor_name IS NOT NULL
-               OR NOT EXISTS (
-                 SELECT 1 FROM control.share_packages p WHERE p.id = NEW.package_id
-                   AND p.source_user_id = me
-                   AND p.source_tenant_id = clinical.current_tenant_id()) THEN
-              RAISE EXCEPTION 'Evento de paquete no permitido desde esta sesión';
-            END IF;
-            RETURN NEW;
-          END IF;
-          -- inbox_notices
-          IF TG_OP = 'UPDATE' THEN
-            IF OLD.user_id IS DISTINCT FROM me THEN
-              RAISE EXCEPTION 'Solo la destinataria marca sus avisos';
-            END IF;
-            RETURN NEW;
-          END IF;
-          IF ctx_role <> 'patient' OR NEW.kind <> 'share_received' OR NOT EXISTS (
-               SELECT 1 FROM control.share_packages p WHERE p.id = NEW.ref_id
-                 AND p.source_user_id = me
-                 AND p.source_tenant_id = clinical.current_tenant_id()
-                 AND p.recipient_user_id = NEW.user_id) THEN
-            RAISE EXCEPTION 'Aviso no permitido desde esta sesión';
-          END IF;
-          RETURN NEW;
-        END $$
-        """
-    )
+    op.execute(SIDE_WRITES_SQL)
     op.execute("DROP TRIGGER IF EXISTS trg_share_events_writes ON control.share_events")
     op.execute(
         "CREATE TRIGGER trg_share_events_writes BEFORE INSERT ON control.share_events "
