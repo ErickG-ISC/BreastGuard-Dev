@@ -432,3 +432,105 @@ class TestCodigo:
         with pytest.raises(share_crypto.DecryptionError):
             share_crypto.decrypt(secret.key, package, "b.bin", blob)
         assert share_crypto.decrypt(secret.key, package, "a.bin", blob) == b"datos"
+
+
+class TestDefensaDeEventosYAvisos:
+    """Revisión de aislamiento: eventos, avisos y prefijos atados al paquete de quien escribe."""
+
+    def _own_package(self, client, owner_engine, world, **extra) -> dict:
+        share(client, world["maria"], include_diary=True, **extra)
+        (row,) = control_rows(owner_engine, "share_packages")
+        return row
+
+    def test_otra_paciente_no_escribe_eventos_en_paquete_ajeno(self, client, owner_engine, world):
+        row = self._own_package(client, owner_engine, world)
+        with (
+            tenant_session(world["ana"]) as session,
+            pytest.raises(DBAPIError, match="Evento de paquete no permitido"),
+        ):
+            session.execute(
+                text("INSERT INTO control.share_events (package_id, kind) VALUES (:p, 'revocado')"),
+                {"p": row["id"]},
+            )
+
+    @pytest.mark.parametrize(
+        ("kind", "names"),
+        [("importado", False), ("creado", True)],
+    )
+    def test_la_paciente_no_inventa_importaciones_ni_nombres(
+        self, client, owner_engine, world, kind, names
+    ):
+        row = self._own_package(client, owner_engine, world)
+        with (
+            tenant_session(world["maria"]) as session,
+            pytest.raises(DBAPIError, match="Evento de paquete no permitido"),
+        ):
+            session.execute(
+                text(
+                    "INSERT INTO control.share_events (package_id, kind, doctor_name) "
+                    "VALUES (:p, :k, :n)"
+                ),
+                {"p": row["id"], "k": kind, "n": "Dra. Falsa" if names else None},
+            )
+
+    def test_no_se_avisa_a_quien_no_es_la_destinataria(self, client, owner_engine, world):
+        row = self._own_package(client, owner_engine, world)
+        for user in (world["doctor"], world["admin"]):
+            with (
+                tenant_session(world["maria"]) as session,
+                pytest.raises(DBAPIError, match="Aviso no permitido"),
+            ):
+                session.execute(
+                    text(
+                        "INSERT INTO control.inbox_notices (tenant_id, user_id, kind, ref_id) "
+                        "VALUES (:t, :u, 'share_received', :p)"
+                    ),
+                    {"t": user.tenant_id, "u": user.id, "p": row["id"]},
+                )
+
+    def test_solo_la_destinataria_marca_su_aviso(self, client, owner_engine, world, outbox):
+        self._own_package(client, owner_engine, world, recipient_email=world["doctor"].email)
+        (notice,) = control_rows(owner_engine, "inbox_notices")
+        sql = text("UPDATE control.inbox_notices SET read_at = now() WHERE id = :id")
+        with (
+            tenant_session(world["maria"]) as session,
+            pytest.raises(DBAPIError, match="Solo la destinataria"),
+        ):
+            session.execute(sql, {"id": notice["id"]})
+        with tenant_session(world["doctor"]) as session:
+            assert session.execute(sql, {"id": notice["id"]}).rowcount == 1
+            session.rollback()
+
+    def test_el_prefijo_es_el_del_propio_paquete(self, client, owner_engine, world):
+        row = self._own_package(client, owner_engine, world)
+        other = dict(TestDefensaEnLaBase()._row(world["maria"]), p=row["object_prefix"])
+        with (
+            tenant_session(world["maria"]) as session,
+            pytest.raises(DBAPIError, match="ck_share_packages_prefix|uq_share_packages_prefix"),
+        ):
+            session.execute(text(TestDefensaEnLaBase.INSERT), other)
+
+    def test_la_paciente_no_oculta_un_paquete_activo_de_la_limpieza(
+        self, client, owner_engine, world
+    ):
+        row = self._own_package(client, owner_engine, world)
+        with (
+            tenant_session(world["maria"]) as session,
+            pytest.raises(DBAPIError, match="solo puede revocar"),
+        ):
+            session.execute(
+                text("UPDATE control.share_packages SET objects_deleted_at = now() WHERE id = :id"),
+                {"id": row["id"]},
+            )
+
+    def test_ningun_tenant_puede_llamarse_transfer(self, owner_engine):
+        with (
+            pytest.raises(DBAPIError, match="ck_tenants_slug_not_reserved"),
+            owner_engine.begin() as conn,
+        ):
+            conn.execute(
+                text(
+                    "INSERT INTO control.tenants (slug, name, kind, plan) "
+                    "VALUES ('transfer', 'x', 'institucion', 'basic')"
+                )
+            )

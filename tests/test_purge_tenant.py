@@ -140,7 +140,67 @@ def test_remove_prefix_pagina_y_recorre_subcarpetas(monkeypatch):
     assert all(p.startswith("clinica-a/images/") for p in bucket.removed)
 
 
-@pytest.mark.parametrize("prefix", ["", "/", "a/b/", "clinica-a", "../x/", "Mayus/"])
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        "",
+        "/",
+        "a/b/",
+        "clinica-a",
+        "../x/",
+        "Mayus/",
+        # transfer/ solo con el uuid de UN paquete, nunca entero ni con subcarpetas
+        "transfer/",
+        "transfer/../x/",
+        "transfer/" + "a" * 32 + "/x/",
+        "transfer/" + "A" * 32 + "/",
+    ],
+)
 def test_remove_prefix_rechaza_prefijos_peligrosos(prefix):
     with pytest.raises(ValueError):
         storage_module.SupabaseStorage(bucket="b").remove_prefix(prefix)
+
+
+def _package(conn, source, recipient_id=None) -> str:
+    """Paquete mínimo como dueño (preparación de datos); devuelve su prefijo."""
+    package_id = conn.execute(text("SELECT gen_random_uuid()")).scalar_one()
+    prefix = f"transfer/{package_id.hex}/"
+    conn.execute(
+        text(
+            "INSERT INTO control.share_packages (id, source_tenant_id, source_user_id, "
+            "key_hash, expires_at, recipient_user_id, sections, analyses_count, size_bytes, "
+            "consent_version, consent_sha256, consented_at, object_prefix) VALUES (:id, :t, :u, "
+            ":h, now() + interval '1 day', :r, '{}'::jsonb, 0, 0, 'v', 'x', now(), :p)"
+        ),
+        {
+            "id": package_id,
+            "t": source.tenant_id,
+            "u": source.id,
+            "h": package_id.hex * 2,
+            "r": recipient_id,
+            "p": prefix,
+        },
+    )
+    return prefix
+
+
+def test_purga_con_paquetes_hacia_sus_medicas_y_de_sus_pacientes(
+    populated, owner_engine, user_factory, b2c_tenant
+):
+    """Un paquete dirigido a una médica de la institución no bloquea la purga (ON DELETE SET
+    NULL); los paquetes de sus pacientes se borran y se devuelven sus prefijos de transfer/."""
+    a = populated["clinica-a"]
+    doctor = user_factory(a, role="doctor")
+    outsider = user_factory(b2c_tenant, role="patient")
+    own_patient = user_factory(a, role="patient")
+    with owner_engine.begin() as conn:
+        _package(conn, outsider, recipient_id=doctor.id)
+        own_prefix = _package(conn, own_patient)
+
+    summary = purge_tenant(owner_engine, "clinica-a")
+
+    assert summary.deleted["control.share_packages"] == 1
+    assert summary.transfer_prefixes == [own_prefix]
+    with owner_engine.connect() as conn:
+        survivor = conn.execute(text("SELECT recipient_user_id FROM control.share_packages")).one()
+    assert survivor.recipient_user_id is None

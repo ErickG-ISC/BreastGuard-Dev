@@ -52,6 +52,16 @@ def _created_at(name: str = "created_at") -> sa.Column:
     return sa.Column(name, sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
 
+def _has_tenant_check() -> bool:
+    return bool(
+        op.get_bind()
+        .execute(
+            sa.text("SELECT 1 FROM pg_constraint WHERE conname = 'ck_tenants_slug_not_reserved'")
+        )
+        .first()
+    )
+
+
 def upgrade() -> None:
     if not table_exists("share_packages", CONTROL):
         op.create_table(
@@ -86,14 +96,21 @@ def upgrade() -> None:
                 ["control.users.tenant_id", "control.users.id"],
                 name="fk_share_packages_source",
             ),
+            # Purgar la institución de la destinataria no debe quedar bloqueado por un paquete
             sa.ForeignKeyConstraint(
-                ["recipient_user_id"], ["control.users.id"], name="fk_share_packages_recipient"
+                ["recipient_user_id"],
+                ["control.users.id"],
+                name="fk_share_packages_recipient",
+                ondelete="SET NULL",
             ),
             sa.UniqueConstraint("key_hash", name="uq_share_packages_key_hash"),
+            sa.UniqueConstraint("object_prefix", name="uq_share_packages_prefix"),
             sa.CheckConstraint(f"status IN ({_in(STATUSES)})", name="ck_share_packages_status"),
             sa.CheckConstraint("char_length(key_hash) = 64", name="ck_share_packages_key_hash"),
+            # El prefijo es el del propio paquete: nadie apunta al contenido de otro
             sa.CheckConstraint(
-                "object_prefix ~ '^transfer/[0-9a-f]{32}/$'", name="ck_share_packages_prefix"
+                "object_prefix = 'transfer/' || replace(id::text, '-', '') || '/'",
+                name="ck_share_packages_prefix",
             ),
             sa.CheckConstraint(
                 "analyses_count BETWEEN 0 AND 10", name="ck_share_packages_analyses_count"
@@ -195,6 +212,8 @@ def upgrade() -> None:
           END IF;
           IF OLD.source_user_id IS DISTINCT FROM clinical.current_user_id()
              OR NOT (NEW.status = OLD.status OR (OLD.status = 'activo' AND NEW.status = 'revocado'))
+             OR (NEW.objects_deleted_at IS DISTINCT FROM OLD.objects_deleted_at
+                 AND NEW.status <> 'revocado')
              OR NEW.failed_attempts IS DISTINCT FROM OLD.failed_attempts
              OR NEW.claimed_by IS DISTINCT FROM OLD.claimed_by
              OR NEW.claimed_at IS DISTINCT FROM OLD.claimed_at
@@ -211,6 +230,64 @@ def upgrade() -> None:
         "CREATE TRIGGER trg_share_packages_writes BEFORE INSERT OR UPDATE "
         "ON control.share_packages FOR EACH ROW EXECUTE FUNCTION control.enforce_share_writes()"
     )
+    # Eventos y avisos: con contexto, solo los de la paciente sobre SUS paquetes
+    op.execute(
+        """
+        CREATE OR REPLACE FUNCTION control.enforce_share_side_writes() RETURNS trigger
+        LANGUAGE plpgsql AS $$
+        DECLARE
+          ctx_role text := NULLIF(current_setting('app.role', true), '');
+          me uuid := clinical.current_user_id();
+        BEGIN
+          IF ctx_role IS NULL THEN
+            RETURN NEW;
+          END IF;
+          IF TG_TABLE_NAME = 'share_events' THEN
+            IF ctx_role <> 'patient' OR NEW.kind NOT IN ('creado', 'revocado')
+               OR NEW.institution_name IS NOT NULL OR NEW.doctor_name IS NOT NULL
+               OR NOT EXISTS (
+                 SELECT 1 FROM control.share_packages p WHERE p.id = NEW.package_id
+                   AND p.source_user_id = me
+                   AND p.source_tenant_id = clinical.current_tenant_id()) THEN
+              RAISE EXCEPTION 'Evento de paquete no permitido desde esta sesión';
+            END IF;
+            RETURN NEW;
+          END IF;
+          -- inbox_notices
+          IF TG_OP = 'UPDATE' THEN
+            IF OLD.user_id IS DISTINCT FROM me THEN
+              RAISE EXCEPTION 'Solo la destinataria marca sus avisos';
+            END IF;
+            RETURN NEW;
+          END IF;
+          IF ctx_role <> 'patient' OR NEW.kind <> 'share_received' OR NOT EXISTS (
+               SELECT 1 FROM control.share_packages p WHERE p.id = NEW.ref_id
+                 AND p.source_user_id = me
+                 AND p.source_tenant_id = clinical.current_tenant_id()
+                 AND p.recipient_user_id = NEW.user_id) THEN
+            RAISE EXCEPTION 'Aviso no permitido desde esta sesión';
+          END IF;
+          RETURN NEW;
+        END $$
+        """
+    )
+    op.execute("DROP TRIGGER IF EXISTS trg_share_events_writes ON control.share_events")
+    op.execute(
+        "CREATE TRIGGER trg_share_events_writes BEFORE INSERT ON control.share_events "
+        "FOR EACH ROW EXECUTE FUNCTION control.enforce_share_side_writes()"
+    )
+    op.execute("DROP TRIGGER IF EXISTS trg_inbox_notices_writes ON control.inbox_notices")
+    op.execute(
+        "CREATE TRIGGER trg_inbox_notices_writes BEFORE INSERT OR UPDATE "
+        "ON control.inbox_notices FOR EACH ROW "
+        "EXECUTE FUNCTION control.enforce_share_side_writes()"
+    )
+    # El prefijo de transferencia nunca puede ser el de un tenant (la purga lo borraría)
+    if not _has_tenant_check():
+        op.execute(
+            "ALTER TABLE control.tenants ADD CONSTRAINT ck_tenants_slug_not_reserved "
+            "CHECK (slug <> 'transfer')"
+        )
     grant_app(
         "share_packages",
         "SELECT, INSERT, UPDATE (status, objects_deleted_at, failed_attempts, claimed_by, "
@@ -231,3 +308,5 @@ def downgrade() -> None:
     op.execute("DROP TABLE IF EXISTS control.share_events")
     op.execute("DROP TABLE IF EXISTS control.share_packages")
     op.execute("DROP FUNCTION IF EXISTS control.enforce_share_writes()")
+    op.execute("DROP FUNCTION IF EXISTS control.enforce_share_side_writes()")
+    op.execute("ALTER TABLE control.tenants DROP CONSTRAINT IF EXISTS ck_tenants_slug_not_reserved")

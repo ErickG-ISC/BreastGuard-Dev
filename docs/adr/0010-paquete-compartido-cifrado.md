@@ -76,7 +76,32 @@ tenant. Además, el servidor no debe poder leer lo compartido ni guardar el cód
    Así el texto coincide con el comportamiento real. Cada cambio de médica se verá en
    "Mis paquetes" como un evento `reasignado`, que llega con la importación.
 
+10. **Revisión de aislamiento** (sin hallazgos críticos; los medios se corrigieron en 0015):
+    - `fk_share_packages_recipient` usa `ON DELETE SET NULL`: un paquete dirigido a una médica
+      no bloquea la purga de su institución.
+    - Triggers en `share_events` e `inbox_notices`. Con contexto de paciente:
+      - solo hay eventos `creado` o `revocado`, sin nombres;
+      - solo sobre sus propios paquetes;
+      - solo avisa a la destinataria resuelta de su paquete;
+      - solo la dueña del aviso lo marca como leído.
+    - `object_prefix` es, por CHECK, el del propio paquete (`transfer/` + id sin guiones), y es
+      único. La paciente solo marca el contenido como borrado en un paquete revocado.
+    - Ningún tenant puede llamarse `transfer`: hay un CHECK en `control.tenants`, y
+      `remove_prefix` rechaza `transfer/` como prefijo de tenant.
+    - El correo a la destinataria sale en segundo plano, para que su latencia no revele si el
+      correo tiene cuenta.
+    - El HMAC lleva un prefijo de dominio, porque `SECRET_KEY` también firma los JWT.
+
 ## Consecuencias
+
+- Rotar `SECRET_KEY` invalida los paquetes activos (duran como máximo 7 días) y las sesiones.
+- La caducidad la registra la limpieza en `share_events`, no en el `audit_log` del tenant de la
+  paciente: la limpieza no tiene contexto clínico. La creación y la revocación sí van en su
+  auditoría.
+- Si el proceso muere entre subir y confirmar, quedan objetos cifrados sin fila bajo
+  `transfer/`. No tienen llave; una pasada que borre carpetas huérfanas queda pendiente.
+- El tope de 5 paquetes activos no es atómico ante peticiones simultáneas; lo acota el límite de
+  5 por minuto.
 
 - Con acceso a la base, sin el código, el contenido no se puede descifrar. Sin `SECRET_KEY`
   tampoco se pueden probar códigos contra el hash.

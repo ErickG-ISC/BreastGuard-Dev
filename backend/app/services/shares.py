@@ -219,14 +219,22 @@ def _remove_quietly(storage: SupabaseStorage, names: list[str]) -> None:
         logger.error("No se pudieron limpiar objetos del paquete; los borrará la limpieza")
 
 
+def send_notice(sender: email_service.EmailSender, message: email_service.EmailMessage) -> None:
+    try:
+        sender.send(message)
+    except Exception as exc:  # el aviso en la app ya quedó; el correo es un extra
+        logger.warning("No se pudo enviar el aviso del paquete (%s)", type(exc).__name__)
+
+
 def create(
     db: Session,
     storage: SupabaseStorage,
-    sender: email_service.EmailSender,
+    notify,
     auth: AuthContext,
     data: ShareCreate,
     ip: str | None,
 ) -> ShareCreated:
+    """`notify(mensaje)` programa el correo a la destinataria para después de responder."""
     consent = current_share_consent()
     if data.consent_version != consent.version:
         raise HTTPException(
@@ -339,10 +347,8 @@ def create(
         raise
 
     if recipient is not None:
-        try:
-            sender.send(email_service.compose_share_notice(to=recipient.email))
-        except Exception as exc:  # el aviso en la app ya quedó; el correo es un extra
-            logger.warning("No se pudo enviar el aviso del paquete (%s)", type(exc).__name__)
+        # Fuera de la petición: su latencia no debe revelar si el correo tiene cuenta
+        notify(email_service.compose_share_notice(to=recipient.email))
     return ShareCreated(
         id=package_id, code=secret.code, link=import_link(secret.code), expires_at=expires_at
     )

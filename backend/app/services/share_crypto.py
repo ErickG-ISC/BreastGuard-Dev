@@ -99,7 +99,10 @@ def _from_raw(raw: bytes) -> ShareSecret:
     return ShareSecret(
         code=_group(_encode(raw)),
         key=_hkdf(raw, b"breastguard/share/v1/key"),
-        lookup_hash=hmac.new(_secret_key(), lookup, hashlib.sha256).hexdigest(),
+        # Prefijo de dominio: SECRET_KEY también firma los JWT
+        lookup_hash=hmac.new(
+            _secret_key(), b"breastguard/share/v1/hash:" + lookup, hashlib.sha256
+        ).hexdigest(),
     )
 
 

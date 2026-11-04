@@ -34,6 +34,8 @@ class Tenant(Base):
         UniqueConstraint("slug", name="uq_tenants_slug"),
         CheckConstraint("kind IN ('b2c', 'institucion')", name="ck_tenants_kind"),
         CheckConstraint("slug ~ '^[a-z0-9][a-z0-9-]{1,40}$'", name="ck_tenants_slug"),
+        # Prefijo de Storage de los paquetes compartidos (0015)
+        CheckConstraint("slug <> 'transfer'", name="ck_tenants_slug_not_reserved"),
         {"schema": "control"},
     )
 
@@ -338,16 +340,21 @@ class SharePackage(Base):
             name="fk_share_packages_source",
         ),
         ForeignKeyConstraint(
-            ["recipient_user_id"], ["control.users.id"], name="fk_share_packages_recipient"
+            ["recipient_user_id"],
+            ["control.users.id"],
+            name="fk_share_packages_recipient",
+            ondelete="SET NULL",
         ),
         UniqueConstraint("key_hash", name="uq_share_packages_key_hash"),
+        UniqueConstraint("object_prefix", name="uq_share_packages_prefix"),
         CheckConstraint(
             "status IN ('activo', 'importando', 'importado', 'revocado', 'caducado')",
             name="ck_share_packages_status",
         ),
         CheckConstraint("char_length(key_hash) = 64", name="ck_share_packages_key_hash"),
         CheckConstraint(
-            "object_prefix ~ '^transfer/[0-9a-f]{32}/$'", name="ck_share_packages_prefix"
+            "object_prefix = 'transfer/' || replace(id::text, '-', '') || '/'",
+            name="ck_share_packages_prefix",
         ),
         CheckConstraint("analyses_count BETWEEN 0 AND 10", name="ck_share_packages_analyses_count"),
         CheckConstraint(

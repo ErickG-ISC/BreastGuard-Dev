@@ -88,10 +88,8 @@ class SupabaseStorage:
 
     def remove_prefix(self, prefix: str) -> int:
         """Borra todos los objetos bajo `{slug}/` (purga) o `transfer/{uuid}/` (paquete, CU-07)."""
-        if not (
-            re.fullmatch(r"[a-z0-9][a-z0-9-]{1,40}/", prefix)
-            or re.fullmatch(r"transfer/[0-9a-f]{32}/", prefix)
-        ):
+        tenant_prefix = re.fullmatch(r"[a-z0-9][a-z0-9-]{1,40}/", prefix) and prefix != "transfer/"
+        if not (tenant_prefix or re.fullmatch(r"transfer/[0-9a-f]{32}/", prefix)):
             raise ValueError("El prefijo debe ser '{slug}/' o 'transfer/{uuid}/'")
         bucket = self._bucket()
         paths: list[str] = []

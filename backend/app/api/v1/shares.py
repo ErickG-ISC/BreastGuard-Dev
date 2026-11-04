@@ -6,7 +6,7 @@ Solo pacientes, con su contexto RLS (TenantDb). La importación es de la médica
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Request, Response, status
 
 from backend.app.api.client_ip import client_ip
 from backend.app.api.deps import Sender, Storage, TenantDb, require_role
@@ -43,10 +43,18 @@ def create_share(
     sender: Sender,
     request: Request,
     response: Response,
+    background: BackgroundTasks,
 ):
     # El código solo se muestra una vez: que ningún intermediario lo guarde
     response.headers["Cache-Control"] = "no-store"
-    return shares.create(db, storage, sender, auth, data, client_ip(request))
+    return shares.create(
+        db,
+        storage,
+        lambda message: background.add_task(shares.send_notice, sender, message),
+        auth,
+        data,
+        client_ip(request),
+    )
 
 
 @router.get("", response_model=ShareList)
