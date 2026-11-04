@@ -24,7 +24,8 @@ import PlatformLog from './pages/admin/PlatformLog';
 import InstitutionUsers from './pages/institution/Users';
 import InstitutionLog from './pages/institution/Log';
 import AcceptInvitation from './pages/AcceptInvitation';
-import DoctorHome from './pages/doctor/DoctorHome';
+import DoctorPanel from './pages/doctor/Panel';
+import DoctorCase from './pages/doctor/Case';
 import DoctorImport from './pages/doctor/Import';
 import ImportLink from './pages/ImportLink';
 import Share from './pages/patient/Share';
@@ -41,9 +42,9 @@ const INSTITUTION_NAV = [
   { label: 'Usuarios', to: '/institucion/usuarios', icon: PeopleIcon },
   { label: 'Bitácora', to: '/institucion/bitacora', icon: LogIcon },
 ];
-// Provisional hasta el panel médico (CU-11), que traerá su propio shell
+// Médica: panel (CU-11), casos (CU-08) e importar paquetes (CU-07)
 const DOCTOR_NAV = [
-  { label: 'Inicio', to: '/medico', icon: HomeIcon },
+  { label: 'Panel', to: '/medico', icon: HomeIcon, exact: true, also: ['/medico/pacientes'] },
   { label: 'Importar paquete', to: '/medico/importar', icon: ShareIcon },
 ];
 
@@ -83,15 +84,16 @@ function App() {
               <Route path="/institucion/usuarios" element={<InstitutionUsers />} />
               <Route path="/institucion/bitacora" element={<InstitutionLog />} />
             </Route>
-            {/* Médica: por ahora, aceptar traspasos de pacientes (0014) */}
+            {/* Médica: panel, caso e importación */}
             <Route
               element={
                 <ProtectedRoute roles={['doctor']}>
-                  <AdminShell title="Médica" items={DOCTOR_NAV} />
+                  <AdminShell title="Médica" items={DOCTOR_NAV} navLabel="Médica" />
                 </ProtectedRoute>
               }
             >
-              <Route path="/medico" element={<DoctorHome />} />
+              <Route path="/medico" element={<DoctorPanel />} />
+              <Route path="/medico/pacientes/:id" element={<DoctorCase />} />
               <Route path="/medico/importar" element={<DoctorImport />} />
             </Route>
             {/* App de paciente: barra inferior en móvil, barra lateral en escritorio */}
