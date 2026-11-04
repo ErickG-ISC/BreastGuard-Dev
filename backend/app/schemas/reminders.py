@@ -77,7 +77,8 @@ class NoticeOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    kind: Kind
+    # share_update: novedades de un paquete compartido (CU-07), desde control.inbox_notices
+    kind: Kind | Literal["share_update"]
     due_at: datetime
     read_at: datetime | None
     created_at: datetime

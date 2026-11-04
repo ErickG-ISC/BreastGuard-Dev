@@ -288,6 +288,24 @@ def _copy(
     return patient.id, len(analyses), len(entries)
 
 
+def notify_source(db: Session, tenant_id, user_id, package_id) -> None:
+    """Aviso `share_update` a la paciente de origen, sin duplicar uno que aún no lee."""
+    pending = db.scalar(
+        select(InboxNotice.id).where(
+            InboxNotice.user_id == user_id,
+            InboxNotice.kind == "share_update",
+            InboxNotice.ref_id == package_id,
+            InboxNotice.read_at.is_(None),
+        )
+    )
+    if pending is None:
+        db.add(
+            InboxNotice(
+                tenant_id=tenant_id, user_id=user_id, kind="share_update", ref_id=package_id
+            )
+        )
+
+
 class ClaimLost(Exception):
     """El reclamo ya no es de quien importa (caducó o lo tomó otra petición)."""
 
@@ -319,6 +337,8 @@ def _confirm(control: Session, storage: SupabaseStorage, auth, package_id: uuid.
             doctor_name=doctor.full_name,
         )
     )
+    # La paciente de origen lo ve en su campana (solo el tipo y el id del paquete)
+    notify_source(control, package.source_tenant_id, package.source_user_id, package_id)
     # Su aviso de "tienes un paquete", si lo tenía, queda leído
     control.execute(
         update(InboxNotice)

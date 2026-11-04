@@ -19,7 +19,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
 from backend.app.api.rate_limit import limiter
-from backend.app.db import new_session
+from backend.app.db import TenantContext, new_session
 from backend.app.services import share_crypto, share_import
 from tests.api.test_semana2_cruzado import create_analysis, submit_questionnaire
 from tests.api.test_shares import body, control_rows, objects_under
@@ -501,3 +501,85 @@ class TestContenidoNoConfiable:
         response = do_import(client, world["doctor"], package["code"])
         assert response.status_code == 409
         assert package_row(owner_engine)["status"] == "caducado"
+
+
+class TestCampanaDeLaPaciente:
+    def test_importar_y_reasignar_avisan_a_la_paciente(
+        self, client, world, b2c_tenant, user_factory
+    ):
+        package = shared(client, world)
+        headers = auth_headers(world["maria"])
+        do_import(client, world["doctor"], package["code"])
+        (notice,) = client.get(f"{API}/notices", params={"unread": True}, headers=headers).json()
+        assert notice["kind"] == "share_update"
+
+        # Otra paciente no puede marcarlo; ella sí
+        ana = user_factory(b2c_tenant, role="patient")
+        url = f"{API}/notices/{notice['id']}/read"
+        assert client.post(url, headers=auth_headers(ana)).status_code == 404
+        assert client.post(url, headers=headers).status_code == 204
+        assert client.get(f"{API}/notices", params={"unread": True}, headers=headers).json() == []
+
+        handover = client.post(
+            f"{API}/institution/users/{world['doctor'].id}/handover",
+            json={"to_user_id": str(world["colleague"].id)},
+            headers=auth_headers(world["admin"]),
+        ).json()
+        client.post(
+            f"{API}/doctor/handovers/{handover['id']}/accept",
+            headers=auth_headers(world["colleague"]),
+        )
+        (again,) = client.get(f"{API}/notices", params={"unread": True}, headers=headers).json()
+        assert again["kind"] == "share_update"
+
+    def test_la_doctora_no_avisa_por_paquetes_ajenos(self, client, owner_engine, world):
+        package = shared(client, world)
+        do_import(client, world["doctor"], package["code"])
+        row = package_row(owner_engine)
+        sql = text(
+            "INSERT INTO control.inbox_notices (tenant_id, user_id, kind, ref_id) "
+            "VALUES (:t, :u, 'share_update', :p)"
+        )
+        params = {"t": world["maria"].tenant_id, "u": world["maria"].id, "p": row["id"]}
+        for doctor in (world["colleague"], world["outsider"]):
+            with (
+                tenant_session(doctor) as session,
+                pytest.raises(DBAPIError, match="Aviso no permitido"),
+            ):
+                session.execute(sql, params)
+        # Ni la responsable puede avisar a otra persona que no sea la paciente de origen
+        with (
+            tenant_session(world["doctor"]) as session,
+            pytest.raises(DBAPIError, match="Aviso no permitido"),
+        ):
+            session.execute(sql, {**params, "u": world["admin"].id, "t": world["clinic"].id})
+
+    def test_la_doctora_no_marca_ni_modifica_avisos_de_la_paciente(self, client, world):
+        package = shared(client, world)
+        do_import(client, world["doctor"], package["code"])
+        with (
+            tenant_session(world["doctor"]) as session,
+            pytest.raises(DBAPIError, match="Solo la destinataria"),
+        ):
+            session.execute(
+                text(
+                    "UPDATE control.inbox_notices SET read_at = now() "
+                    "WHERE kind = 'share_update' AND user_id = :u"
+                ),
+                {"u": world["maria"].id},
+            )
+
+    def test_sin_avisos_duplicados(self, client, owner_engine, world):
+        package = shared(client, world)
+        do_import(client, world["doctor"], package["code"])
+        package_id = package_row(owner_engine)["id"]
+        with new_session(TenantContext(world["clinic"].id, world["doctor"].id, "doctor")) as db:
+            share_import.notify_source(db, world["maria"].tenant_id, world["maria"].id, package_id)
+            db.commit()
+        with owner_engine.connect() as conn:
+            assert (
+                conn.execute(
+                    text("SELECT count(*) FROM control.inbox_notices WHERE kind = 'share_update'")
+                ).scalar_one()
+                == 1
+            )

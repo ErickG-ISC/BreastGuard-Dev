@@ -149,6 +149,17 @@ paciente genera una copia cifrada y la médica la importa en su propio tenant:
 - **Auditoría en ambos lados:** `share.create`/`share.revoke` en el tenant de la paciente y
   `share.import` en el de la médica.
 
+## 6 ter. Panel y caso de la médica (ADR 0012)
+
+- Toda consulta del panel y del caso corre en el `TenantDb` de la doctora y lleva, además de RLS,
+  el mismo filtro explícito (sus fichas y las de un traspaso pendiente hacia ella).
+- **Ids y búsqueda:** el caso se abre por id; el nombre buscado va en el cuerpo de un POST, nunca
+  en la URL.
+- **En la base:**
+  - el estado del caso solo cambia por transiciones válidas (trigger);
+  - un análisis nuevo lo devuelve a pendiente;
+  - las notas solo las edita su autora y la paciente no puede leerlas.
+
 ## 7 bis. Traspaso de pacientes entre médicas (ADR 0009, migración 0014)
 
 Las fichas de institución solo las ve su médica responsable. Si ella se va, la administración no

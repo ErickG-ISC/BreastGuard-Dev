@@ -21,8 +21,15 @@ import { LogoutIcon, MoreIcon } from './icons';
 const DRAWER_WIDTH = 260;
 
 // Estructura de las pantallas de administración (wireframe D04): barra lateral fija en
-// escritorio y cajón con botón de menú en móvil. `items`: [{ label, to, icon }].
-export default function AdminShell({ title, items }) {
+// escritorio y cajón con botón de menú en móvil. `items`: [{ label, to, icon, exact?, also? }]:
+// `exact` evita que /medico quede activo en /medico/importar; `also`, rutas hijas que sí cuentan.
+function isSelected(item, pathname) {
+  if (pathname === item.to) return true;
+  if ((item.also ?? []).some((p) => pathname.startsWith(p))) return true;
+  return !item.exact && pathname.startsWith(`${item.to}/`);
+}
+
+export default function AdminShell({ title, items, navLabel = 'Administración' }) {
   const { logout } = useAuth();
   const { pathname } = useLocation();
   const desktop = useMediaQuery((theme) => theme.breakpoints.up('md'));
@@ -39,13 +46,13 @@ export default function AdminShell({ title, items }) {
         </Typography>
       </Toolbar>
       <Divider />
-      <List component="nav" aria-label="Administración">
-        {items.map(({ label, to, icon: Icon }) => (
+      <List component="nav" aria-label={navLabel}>
+        {items.map(({ label, to, icon: Icon, ...item }) => (
           <ListItemButton
             key={to}
             component={RouterLink}
             to={to}
-            selected={pathname === to || pathname.startsWith(`${to}/`)}
+            selected={isSelected({ to, ...item }, pathname)}
             onClick={() => setOpen(false)}
             sx={{ borderRadius: 2, mx: 1 }}
           >
