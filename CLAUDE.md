@@ -159,6 +159,8 @@ Reglas de infraestructura:
   - Tablas `control.share_packages`, `share_events` e `inbox_notices` (0015), sin datos clínicos. El trigger `enforce_share_writes` solo deja crear o revocar a la paciente en su contexto.
   - `POST /internal/shares/cleanup` (mismo `X-Cron-Secret`): caduca y borra el contenido; lo llama `reminders.yml`.
   - Frontend: `/compartir` (Share, con QR) y `/compartidos` (MyShares).
+  - Importación (CU-08, `services/share_import.py`): `POST /doctor/shares/import` (solo doctora). Reclamo atómico en control, descifrado en memoria y copia en el `TenantDb` de la doctora (ficha `importado`, ella responsable), luego confirmación (`importado`) y borrado de `transfer/`. Un fallo libera el reclamo; un reintento tras una caída no duplica (índice único `source_package_id`). 5 fallos por cuenta en 15 min y 5 ajenos por paquete (lo revocan). Avisos de la médica: `GET /doctor/notices` y `POST /doctor/notices/{id}/read`. Frontend: `/importar` (pública, guarda el código del fragmento) y `/medico/importar`.
+  - Al aceptar un traspaso de fichas importadas se escribe `share_events.reasignado` (trigger de 0016); crear un traspaso avisa por correo a la médica de origen y a las demás `tenant_admin`.
 - `api/v1/images.py`: `POST /upload` (paciente), `GET /images` y `GET /images/{id}` (con URL firmada; ajena o inexistente da el mismo 404). Lecturas, subidas y accesos denegados (`image.denied`) auditados.
 - `api/v1/audit.py`: `GET /audit` para `tenant_admin` con filtros `from`, `to`, `actor_id`, `limit` y `offset`.
 - `api/rate_limit.py`: límites por IP y ruta: `/auth/token` 10/min, `/auth/register` 5/min, `/images/upload` 20/min. La IP sale de `api/client_ip.py`: ignora `X-Forwarded-For` salvo con `TRUSTED_PROXY_HOPS` (en Render, `1`; ver ADR 0004).

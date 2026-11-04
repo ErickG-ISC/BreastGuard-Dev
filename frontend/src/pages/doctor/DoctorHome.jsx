@@ -1,7 +1,17 @@
 import { Alert, Button, Card, CardContent, CircularProgress, Stack, Typography } from '@mui/material';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Navigate, Link as RouterLink } from 'react-router-dom';
 import { api, errorMessage } from '../../api/client';
 import { formatDateTime } from '../admin/adminLabels';
+import { PENDING_CODE_KEY } from '../ImportLink';
+
+function hasPendingCode() {
+  try {
+    return Boolean(sessionStorage.getItem(PENDING_CODE_KEY));
+  } catch {
+    return false;
+  }
+}
 
 // Inicio de la médica. Por ahora, los traspasos de pacientes hacia ella (0014); el panel con
 // la lista de pacientes llega con CU-11.
@@ -11,6 +21,9 @@ export default function DoctorHome() {
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
+  const [notices, setNotices] = useState([]);
+  // Llegó por el enlace de la paciente antes de iniciar sesión: directo a importar
+  const [pending] = useState(hasPendingCode);
 
   const load = useCallback(() => {
     api
@@ -20,6 +33,10 @@ export default function DoctorHome() {
         setError('');
       })
       .catch((err) => setError(errorMessage(err, 'No se pudieron cargar los traspasos.')));
+    api
+      .get('/doctor/notices')
+      .then(({ data }) => setNotices(data.filter((n) => !n.read_at)))
+      .catch(() => setNotices([]));
   }, []);
 
   useEffect(() => {
@@ -42,11 +59,25 @@ export default function DoctorHome() {
     }
   }
 
+  if (pending) return <Navigate to="/medico/importar" replace />;
+
   return (
     <Stack spacing={2}>
       <Typography variant="h5" component="h1">
         Inicio
       </Typography>
+      {notices.some((n) => n.kind === 'share_received') && (
+        <Alert
+          severity="info"
+          action={
+            <Button color="inherit" size="small" component={RouterLink} to="/medico/importar">
+              Importar
+            </Button>
+          }
+        >
+          Una paciente compartió un paquete contigo. Pídele el código o abre su enlace para importarlo.
+        </Alert>
+      )}
       {notice && (
         <Alert severity="success" onClose={() => setNotice('')}>
           {notice}

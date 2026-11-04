@@ -25,10 +25,12 @@ import InstitutionUsers from './pages/institution/Users';
 import InstitutionLog from './pages/institution/Log';
 import AcceptInvitation from './pages/AcceptInvitation';
 import DoctorHome from './pages/doctor/DoctorHome';
+import DoctorImport from './pages/doctor/Import';
+import ImportLink from './pages/ImportLink';
 import Share from './pages/patient/Share';
 import MyShares from './pages/patient/MyShares';
 import AdminShell from './components/AdminShell';
-import { BusinessIcon, HomeIcon, LogIcon, PeopleIcon } from './components/icons';
+import { BusinessIcon, HomeIcon, LogIcon, PeopleIcon, ShareIcon } from './components/icons';
 import theme from './theme';
 
 const PLATFORM_NAV = [
@@ -40,7 +42,10 @@ const INSTITUTION_NAV = [
   { label: 'Bitácora', to: '/institucion/bitacora', icon: LogIcon },
 ];
 // Provisional hasta el panel médico (CU-11), que traerá su propio shell
-const DOCTOR_NAV = [{ label: 'Inicio', to: '/medico', icon: HomeIcon }];
+const DOCTOR_NAV = [
+  { label: 'Inicio', to: '/medico', icon: HomeIcon },
+  { label: 'Importar paquete', to: '/medico/importar', icon: ShareIcon },
+];
 
 function App() {
   return (
@@ -54,6 +59,7 @@ function App() {
             <Route path="/registro" element={<Register />} />
             <Route path="/baja" element={<Unsubscribe />} />
             <Route path="/invitacion" element={<AcceptInvitation />} />
+            <Route path="/importar" element={<ImportLink />} />
             {/* Administración de plataforma (wireframe D04) */}
             <Route
               element={
@@ -86,6 +92,7 @@ function App() {
               }
             >
               <Route path="/medico" element={<DoctorHome />} />
+              <Route path="/medico/importar" element={<DoctorImport />} />
             </Route>
             {/* App de paciente: barra inferior en móvil, barra lateral en escritorio */}
             <Route
