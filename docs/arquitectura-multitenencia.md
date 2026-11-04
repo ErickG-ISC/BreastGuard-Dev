@@ -135,6 +135,36 @@ de los errores solo se registra el tipo.
 - **Recordatorios (ADR 0007):** el despachador usa la sesión de control sin contexto, así que no
   puede ver `clinical` aunque quisiera.
 
+## 7 bis. Traspaso de pacientes entre médicas (ADR 0009, migración 0014)
+
+Las fichas de institución solo las ve su médica responsable. Si ella se va, la administración no
+puede moverlas porque no tiene acceso clínico. El traspaso va en dos pasos:
+
+1. **La administración lo crea en `control`.** `tenant_admin` o `platform_admin`, con su alcance,
+   inserta en `control.patient_handovers` un traspaso pendiente de X a Y. Lleva solo ids y fechas.
+2. **Visibilidad previa a la aceptación.** Mientras el traspaso está pendiente, la regla de acceso
+   (`clinical_access_rule(..., handover=True)`) deja a Y ver y agregar datos a las fichas de X:
+   - la subconsulta a `control.patient_handovers` se filtra por tenant y destino del contexto;
+   - solo cuentan los traspasos pendientes (ni aceptados ni cancelados);
+   - es la **única excepción** a "la doctora solo ve a sus pacientes", y nunca cruza tenants.
+3. **Y lo acepta con su propio contexto** (`POST /doctor/handovers/{id}/accept`, TenantDb): un
+   UPDATE de `responsible_doctor_id` a su nombre, con `audit_log` y `admin_events` en la misma
+   transacción. Mientras no lo acepte, no puede cambiar el estado de esas fichas.
+
+Defensas en la base (control no tiene RLS y `app_user` también es el rol de las sesiones clínicas):
+- **Trigger `control.enforce_handover_writes`:** una sesión con contexto de paciente o doctora no
+  crea traspasos. Solo la doctora de destino marca como aceptado uno pendiente hacia ella.
+- **Fichas a nombre propio:** el WITH CHECK del UPDATE de `patients` y la política
+  `patients_insert_own_doctor` solo dejan fichas a nombre de la doctora del contexto.
+- **Coherencia:**
+  - un pendiente por médica de origen, y sin cadenas;
+  - destino: una doctora activa del mismo tenant;
+  - al desactivar a la destinataria o quitarle el rol, sus pendientes se cancelan;
+  - cancelar quita la visibilidad de inmediato.
+- **Riesgo residual:** una administradora con una segunda cuenta de doctora (otro correo) podría
+  traspasarse pacientes. Queda en la bitácora `handover.create` y en la auditoría clínica de la
+  aceptación.
+
 ## 8. Pruebas
 
 Corren contra **Postgres 17 real**: Docker en local y un servicio en CI. `tests/pgtest.py` crea
