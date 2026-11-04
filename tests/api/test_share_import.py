@@ -501,3 +501,55 @@ class TestContenidoNoConfiable:
         response = do_import(client, world["doctor"], package["code"])
         assert response.status_code == 409
         assert package_row(owner_engine)["status"] == "caducado"
+
+
+class TestCampanaDeLaPaciente:
+    def test_importar_y_reasignar_avisan_a_la_paciente(
+        self, client, world, b2c_tenant, user_factory
+    ):
+        package = shared(client, world)
+        headers = auth_headers(world["maria"])
+        do_import(client, world["doctor"], package["code"])
+        (notice,) = client.get(f"{API}/notices", params={"unread": True}, headers=headers).json()
+        assert notice["kind"] == "share_update"
+
+        # Otra paciente no puede marcarlo; ella sí
+        ana = user_factory(b2c_tenant, role="patient")
+        url = f"{API}/notices/{notice['id']}/read"
+        assert client.post(url, headers=auth_headers(ana)).status_code == 404
+        assert client.post(url, headers=headers).status_code == 204
+        assert client.get(f"{API}/notices", params={"unread": True}, headers=headers).json() == []
+
+        handover = client.post(
+            f"{API}/institution/users/{world['doctor'].id}/handover",
+            json={"to_user_id": str(world["colleague"].id)},
+            headers=auth_headers(world["admin"]),
+        ).json()
+        client.post(
+            f"{API}/doctor/handovers/{handover['id']}/accept",
+            headers=auth_headers(world["colleague"]),
+        )
+        (again,) = client.get(f"{API}/notices", params={"unread": True}, headers=headers).json()
+        assert again["kind"] == "share_update"
+
+    def test_la_doctora_no_avisa_por_paquetes_ajenos(self, client, owner_engine, world):
+        package = shared(client, world)
+        do_import(client, world["doctor"], package["code"])
+        row = package_row(owner_engine)
+        sql = text(
+            "INSERT INTO control.inbox_notices (tenant_id, user_id, kind, ref_id) "
+            "VALUES (:t, :u, 'share_update', :p)"
+        )
+        params = {"t": world["maria"].tenant_id, "u": world["maria"].id, "p": row["id"]}
+        for doctor in (world["colleague"], world["outsider"]):
+            with (
+                tenant_session(doctor) as session,
+                pytest.raises(DBAPIError, match="Aviso no permitido"),
+            ):
+                session.execute(sql, params)
+        # Ni la responsable puede avisar a otra persona que no sea la paciente de origen
+        with (
+            tenant_session(world["doctor"]) as session,
+            pytest.raises(DBAPIError, match="Aviso no permitido"),
+        ):
+            session.execute(sql, {**params, "u": world["admin"].id, "t": world["clinic"].id})

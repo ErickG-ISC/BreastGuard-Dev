@@ -8,6 +8,7 @@ const POLL_MS = 5 * 60 * 1000;
 export const NOTICE_TEXT = {
   self_exam: { title: 'Es momento de tu autoexploración', action: 'Comenzar', to: '/autoexploracion' },
   repeat_analysis: { title: 'Recordatorio: repetir tu análisis de imagen', action: 'Analizar', to: '/analizar' },
+  share_update: { title: 'Hay novedades sobre un paquete que compartiste', action: 'Ver', to: '/compartidos' },
 };
 
 const NoticesContext = createContext({ notices: [], markRead: async () => {}, refresh: () => {} });

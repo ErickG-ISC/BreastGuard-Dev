@@ -17,8 +17,8 @@ from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from backend.app.models.control import Reminder, ReminderNotice, Tenant, User
-from backend.app.schemas.reminders import ReminderIn
+from backend.app.models.control import InboxNotice, Reminder, ReminderNotice, Tenant, User
+from backend.app.schemas.reminders import NoticeOut, ReminderIn
 from backend.app.services import email as email_service
 from backend.app.services.auth import AuthContext
 from backend.app.services.reminder_schedule import next_run, zone
@@ -83,15 +83,38 @@ def delete(db: Session, auth: AuthContext, kind: str) -> None:
     db.commit()
 
 
-def list_notices(
-    db: Session, auth: AuthContext, unread_only: bool, limit: int
-) -> list[ReminderNotice]:
-    query = select(ReminderNotice).where(_own_notices(auth))
-    if unread_only:
-        query = query.where(ReminderNotice.read_at.is_(None))
-    return list(
-        db.scalars(query.order_by(ReminderNotice.due_at.desc(), ReminderNotice.id).limit(limit))
+def _own_inbox(auth: AuthContext):
+    return (
+        (InboxNotice.user_id == auth.user_id)
+        & (InboxNotice.tenant_id == auth.tenant_id)
+        & (InboxNotice.kind == "share_update")
     )
+
+
+def list_notices(db: Session, auth: AuthContext, unread_only: bool, limit: int) -> list[NoticeOut]:
+    """Recordatorios (CU-05) y novedades de sus paquetes (CU-07), del más reciente al más viejo."""
+    reminders_q = select(ReminderNotice).where(_own_notices(auth))
+    inbox_q = select(InboxNotice).where(_own_inbox(auth))
+    if unread_only:
+        reminders_q = reminders_q.where(ReminderNotice.read_at.is_(None))
+        inbox_q = inbox_q.where(InboxNotice.read_at.is_(None))
+    items = [
+        NoticeOut.model_validate(n)
+        for n in db.scalars(
+            reminders_q.order_by(ReminderNotice.due_at.desc(), ReminderNotice.id).limit(limit)
+        )
+    ] + [
+        NoticeOut(
+            id=n.id,
+            kind="share_update",
+            due_at=n.created_at,
+            read_at=n.read_at,
+            created_at=n.created_at,
+        )
+        for n in db.scalars(inbox_q.order_by(InboxNotice.created_at.desc()).limit(limit))
+    ]
+    items.sort(key=lambda n: n.due_at, reverse=True)
+    return items[:limit]
 
 
 def mark_read(db: Session, auth: AuthContext, notice_id: uuid.UUID) -> None:
@@ -101,6 +124,13 @@ def mark_read(db: Session, auth: AuthContext, notice_id: uuid.UUID) -> None:
         .values(read_at=_now())
         .execution_options(synchronize_session=False)
     )
+    if result.rowcount == 0:
+        result = db.execute(
+            update(InboxNotice)
+            .where(_own_inbox(auth), InboxNotice.id == notice_id)
+            .values(read_at=_now())
+            .execution_options(synchronize_session=False)
+        )
     if result.rowcount == 0:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Aviso no encontrado")

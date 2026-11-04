@@ -319,6 +319,15 @@ def _confirm(control: Session, storage: SupabaseStorage, auth, package_id: uuid.
             doctor_name=doctor.full_name,
         )
     )
+    # La paciente de origen lo ve en su campana (solo el tipo y el id del paquete)
+    control.add(
+        InboxNotice(
+            tenant_id=package.source_tenant_id,
+            user_id=package.source_user_id,
+            kind="share_update",
+            ref_id=package_id,
+        )
+    )
     # Su aviso de "tienes un paquete", si lo tenía, queda leído
     control.execute(
         update(InboxNotice)

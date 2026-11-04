@@ -10,6 +10,8 @@
 - `case_notes`: `updated_at`, UPDATE (body) y DELETE solo de su autora; SELECT solo de doctoras
   (la paciente nunca ve las notas, ni siquiera por la regla de acceso).
 - Índice para "más recientes" del panel.
+- La campana de la paciente: la doctora que acepta un traspaso de fichas importadas también
+  deja un aviso `share_update` a la paciente de origen (mismas condiciones que `reasignado`).
 
 Revision ID: 0017
 Revises: 0016
@@ -17,6 +19,7 @@ Create Date: 2026-11-05
 
 """
 
+import importlib
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -40,6 +43,31 @@ depends_on: str | Sequence[str] | None = None
 
 # Marca de transacción que pone el trigger de análisis para el regreso automático a pendiente
 AUTO_FLAG = "app.case_status_auto"
+
+_PREVIOUS_SIDE_WRITES = importlib.import_module(
+    "backend.migrations.versions.0016_evento_reasignado"
+).SIDE_WRITES_SQL
+_PATIENT_NOTICE_CHECK = (
+    "          IF ctx_role <> 'patient' OR NEW.kind <> 'share_received' OR NOT EXISTS ("
+)
+_DOCTOR_NOTICE = """          IF ctx_role = 'doctor' AND NEW.kind = 'share_update' THEN
+            IF EXISTS (
+                 SELECT 1 FROM control.share_packages p
+                 WHERE p.id = NEW.ref_id AND p.imported_tenant_id = tenant
+                   AND p.source_user_id = NEW.user_id AND p.source_tenant_id = NEW.tenant_id)
+               AND EXISTS (
+                 SELECT 1 FROM clinical.patients c
+                 WHERE c.tenant_id = tenant AND c.source_package_id = NEW.ref_id
+                   AND c.responsible_doctor_id = me) THEN
+              RETURN NEW;
+            END IF;
+            RAISE EXCEPTION 'Aviso no permitido desde esta sesión';
+          END IF;
+"""
+assert _PATIENT_NOTICE_CHECK in _PREVIOUS_SIDE_WRITES
+SIDE_WRITES_SQL = _PREVIOUS_SIDE_WRITES.replace(
+    _PATIENT_NOTICE_CHECK, _DOCTOR_NOTICE + _PATIENT_NOTICE_CHECK, 1
+)
 
 
 def _has_column(table: str, column: str) -> bool:
@@ -149,10 +177,12 @@ def upgrade() -> None:
         "CREATE INDEX IF NOT EXISTS ix_patients_doctor_created "
         "ON clinical.patients (tenant_id, responsible_doctor_id, created_at)"
     )
+    op.execute(SIDE_WRITES_SQL)
 
 
 def downgrade() -> None:
     assert_bypass(op.get_bind())
+    op.execute(_PREVIOUS_SIDE_WRITES)
     op.execute("DROP INDEX IF EXISTS clinical.ix_patients_doctor_created")
     op.execute(f"REVOKE UPDATE (body, updated_at), DELETE ON clinical.case_notes FROM {app_role()}")
     for policy in (

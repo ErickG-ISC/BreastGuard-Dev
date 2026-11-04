@@ -18,7 +18,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased
 
 from backend.app.models.clinical import Patient
-from backend.app.models.control import PatientHandover, ShareEvent, SharePackage, Tenant, User
+from backend.app.models.control import (
+    InboxNotice,
+    PatientHandover,
+    ShareEvent,
+    SharePackage,
+    Tenant,
+    User,
+)
 from backend.app.schemas.handovers import HandoverCreate, HandoverOut, PendingHandoverOut
 from backend.app.services import admin_events, audit
 from backend.app.services import email as email_service
@@ -238,8 +245,10 @@ def accept(db: Session, auth: AuthContext, handover_id: uuid.UUID, ip: str | Non
     now = datetime.now(UTC)
     # Fichas importadas que cambian de médica: la paciente de origen lo verá (CU-07)
     packages = list(
-        db.scalars(
-            select(SharePackage.id).where(
+        db.execute(
+            select(
+                SharePackage.id, SharePackage.source_tenant_id, SharePackage.source_user_id
+            ).where(
                 SharePackage.imported_tenant_id == auth.tenant_id,
                 SharePackage.id.in_(
                     select(Patient.source_package_id).where(
@@ -265,13 +274,21 @@ def accept(db: Session, auth: AuthContext, handover_id: uuid.UUID, ip: str | Non
     if packages:
         institution = db.get(Tenant, auth.tenant_id).name
         doctor = db.get(User, auth.user_id).full_name
-        for package_id in packages:
+        for package_id, source_tenant_id, source_user_id in packages:
             db.add(
                 ShareEvent(
                     package_id=package_id,
                     kind="reasignado",
                     institution_name=institution,
                     doctor_name=doctor,
+                )
+            )
+            db.add(
+                InboxNotice(
+                    tenant_id=source_tenant_id,
+                    user_id=source_user_id,
+                    kind="share_update",
+                    ref_id=package_id,
                 )
             )
     audit.record(
