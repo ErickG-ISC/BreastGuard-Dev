@@ -91,6 +91,17 @@ PROTECTED = {
     "doctor_import_share": ("POST", f"{API}/doctor/shares/import", {"json": {"code": "x"}}),
     "doctor_notices": ("GET", f"{API}/doctor/notices", {}),
     "doctor_read_notice": ("POST", f"{API}/doctor/notices/{SOME_ID}/read", {}),
+    "doctor_search_patients": ("POST", f"{API}/doctor/patients/search", {"json": {}}),
+    "doctor_patients_summary": ("GET", f"{API}/doctor/patients/summary", {}),
+    "doctor_case": ("GET", f"{API}/doctor/patients/{SOME_ID}", {}),
+    "doctor_case_status": (
+        "PATCH",
+        f"{API}/doctor/patients/{SOME_ID}/status",
+        {"json": {"status": "revisado"}},
+    ),
+    "doctor_add_note": ("POST", f"{API}/doctor/patients/{SOME_ID}/notes", {"json": {"body": "x"}}),
+    "doctor_update_note": ("PATCH", f"{API}/doctor/notes/{SOME_ID}", {"json": {"body": "x"}}),
+    "doctor_delete_note": ("DELETE", f"{API}/doctor/notes/{SOME_ID}", {}),
     # CU-01 (solo pacientes)
     "subscription_get": ("GET", f"{API}/subscription/me", {}),
     "subscription_put": ("PUT", f"{API}/subscription/me", {"json": {"plan_code": "plus"}}),

@@ -4,7 +4,7 @@
 - importar un paquete compartido como copia en su tenant (CU-08, ADR 0010);
 - sus avisos internos (p. ej. "tienes un paquete").
 
-El panel y el caso llegan después.
+- panel (CU-11) y caso (CU-08): lista, contadores, caso completo, estado y notas.
 """
 
 import uuid
@@ -15,9 +15,18 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from backend.app.api.client_ip import client_ip
 from backend.app.api.deps import ControlDb, Storage, TenantDb, require_role
 from backend.app.api.rate_limit import rate_limit
+from backend.app.schemas.cases import (
+    CaseNoteIn,
+    CaseNoteOut,
+    CaseOut,
+    CaseStatusIn,
+    PanelPage,
+    PanelSummary,
+    PatientSearch,
+)
 from backend.app.schemas.handovers import HandoverAccepted, PendingHandoverOut
 from backend.app.schemas.shares import InboxNoticeOut, ShareImport, ShareImported
-from backend.app.services import handovers, notices, share_import
+from backend.app.services import cases, handovers, notices, share_import
 from backend.app.services.auth import AuthContext
 from backend.app.services.tenants import NotFoundError
 
@@ -73,3 +82,59 @@ def list_notices(auth: DoctorUser, db: TenantDb):
 @router.post("/notices/{notice_id}/read", status_code=204, dependencies=[WRITE_LIMIT])
 def read_notice(notice_id: uuid.UUID, auth: DoctorUser, db: TenantDb):
     notices.mark_read(db, auth, notice_id)
+
+
+# --- Panel y caso -----------------------------------------------------------------------
+
+READ_LIMIT = Depends(rate_limit("doctor_read", 120, 60))
+
+
+@router.post("/patients/search", response_model=PanelPage, dependencies=[READ_LIMIT])
+def search_patients(data: PatientSearch, auth: DoctorUser, db: TenantDb, request: Request):
+    return cases.search(db, auth, data, client_ip(request))
+
+
+@router.get("/patients/summary", response_model=PanelSummary, dependencies=[READ_LIMIT])
+def patients_summary(auth: DoctorUser, db: TenantDb):
+    return cases.summary(db, auth)
+
+
+@router.get("/patients/{patient_id}", response_model=CaseOut, dependencies=[READ_LIMIT])
+def get_case(
+    patient_id: uuid.UUID, auth: DoctorUser, db: TenantDb, storage: Storage, request: Request
+):
+    return cases.get_case(db, storage, auth, patient_id, client_ip(request))
+
+
+@router.patch("/patients/{patient_id}/status", dependencies=[WRITE_LIMIT])
+def set_case_status(
+    patient_id: uuid.UUID, data: CaseStatusIn, auth: DoctorUser, db: TenantDb, request: Request
+):
+    result = cases.set_status(db, auth, patient_id, data.status, client_ip(request))
+    return {"status": result.status, "reviewed_at": result.reviewed_at}
+
+
+@router.post(
+    "/patients/{patient_id}/notes",
+    response_model=CaseNoteOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[WRITE_LIMIT],
+)
+def add_note(
+    patient_id: uuid.UUID, data: CaseNoteIn, auth: DoctorUser, db: TenantDb, request: Request
+):
+    return cases.add_note(db, auth, patient_id, data, client_ip(request))
+
+
+@router.patch("/notes/{note_id}", response_model=CaseNoteOut, dependencies=[WRITE_LIMIT])
+def update_note(
+    note_id: uuid.UUID, data: CaseNoteIn, auth: DoctorUser, db: TenantDb, request: Request
+):
+    return cases.update_note(db, auth, note_id, data, client_ip(request))
+
+
+@router.delete(
+    "/notes/{note_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[WRITE_LIMIT]
+)
+def delete_note(note_id: uuid.UUID, auth: DoctorUser, db: TenantDb, request: Request):
+    cases.delete_note(db, auth, note_id, client_ip(request))
