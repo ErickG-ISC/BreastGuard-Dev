@@ -95,8 +95,8 @@ def search_patients(data: PatientSearch, auth: DoctorUser, db: TenantDb, request
 
 
 @router.get("/patients/summary", response_model=PanelSummary, dependencies=[READ_LIMIT])
-def patients_summary(auth: DoctorUser, db: TenantDb):
-    return cases.summary(db, auth)
+def patients_summary(auth: DoctorUser, db: TenantDb, request: Request):
+    return cases.summary(db, auth, client_ip(request))
 
 
 @router.get("/patients/{patient_id}", response_model=CaseOut, dependencies=[READ_LIMIT])

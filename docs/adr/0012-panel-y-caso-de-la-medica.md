@@ -78,11 +78,20 @@ ella) y sin acceso clínico para la administración.
    la paciente de ese paquete.
 8. **Escenario de demostración** (`backend/scripts/demo_flow.py`):
    - usa los mismos servicios de la API;
-   - pacientes `demo-paciente-…@example.com` en el b2c comparten, y la doctora de un tenant
+   - pacientes `demo-paciente-…@demo.invalid` en el b2c comparten, y la doctora de un tenant
      `demo-…` importa;
    - los resultados son de guion (predictor doble, versión `demo-guion`);
    - `--clean` solo borra esas cuentas y sus copias en tenants `demo-…`, y se niega si alguna
      copia está en otro tenant.
+
+9. **Revisión de aislamiento** (sin hallazgos críticos; los medios se corrigieron):
+   - **Avisos:** la rama de la doctora en el trigger de avisos aplica solo a INSERT; un UPDATE
+     sigue exigiendo ser la destinataria. Además, no se crea un aviso nuevo si ya hay uno sin
+     leer para esa paciente y ese paquete.
+   - **Cuentas demo:** usan el dominio reservado `@demo.invalid`, que el registro público
+     rechaza. `--clean` no puede coincidir con ninguna cuenta real, y `--create` pide
+     confirmación.
+   - **Contadores:** también se auditan (`case.summary`).
 
 ## Rendimiento
 

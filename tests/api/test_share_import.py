@@ -19,7 +19,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
 from backend.app.api.rate_limit import limiter
-from backend.app.db import new_session
+from backend.app.db import TenantContext, new_session
 from backend.app.services import share_crypto, share_import
 from tests.api.test_semana2_cruzado import create_analysis, submit_questionnaire
 from tests.api.test_shares import body, control_rows, objects_under
@@ -553,3 +553,33 @@ class TestCampanaDeLaPaciente:
             pytest.raises(DBAPIError, match="Aviso no permitido"),
         ):
             session.execute(sql, {**params, "u": world["admin"].id, "t": world["clinic"].id})
+
+    def test_la_doctora_no_marca_ni_modifica_avisos_de_la_paciente(self, client, world):
+        package = shared(client, world)
+        do_import(client, world["doctor"], package["code"])
+        with (
+            tenant_session(world["doctor"]) as session,
+            pytest.raises(DBAPIError, match="Solo la destinataria"),
+        ):
+            session.execute(
+                text(
+                    "UPDATE control.inbox_notices SET read_at = now() "
+                    "WHERE kind = 'share_update' AND user_id = :u"
+                ),
+                {"u": world["maria"].id},
+            )
+
+    def test_sin_avisos_duplicados(self, client, owner_engine, world):
+        package = shared(client, world)
+        do_import(client, world["doctor"], package["code"])
+        package_id = package_row(owner_engine)["id"]
+        with new_session(TenantContext(world["clinic"].id, world["doctor"].id, "doctor")) as db:
+            share_import.notify_source(db, world["maria"].tenant_id, world["maria"].id, package_id)
+            db.commit()
+        with owner_engine.connect() as conn:
+            assert (
+                conn.execute(
+                    text("SELECT count(*) FROM control.inbox_notices WHERE kind = 'share_update'")
+                ).scalar_one()
+                == 1
+            )

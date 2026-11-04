@@ -166,7 +166,7 @@ Reglas de infraestructura:
   - "Sospechoso": clase en `MLSettings.suspicious_classes` o marca `notable_malignant_probability` del último análisis (una sola fuente).
   - 0017: trigger `enforce_case_status` (transiciones), `reviewed_by` y `reviewed_at` puestos por el trigger, un análisis nuevo devuelve el caso a pendiente, y notas que edita o borra solo su autora y que la paciente nunca ve.
   - Frontend: `/medico` (Panel) y `/medico/pacientes/:id` (Case). La campana de la paciente incluye avisos `share_update` de sus paquetes.
-  - `backend/scripts/demo_flow.py`: escenario de demo por el flujo real (solo cuentas `demo-paciente-…@example.com` y tenants `demo-…`).
+  - `backend/scripts/demo_flow.py`: escenario de demo por el flujo real (solo cuentas `demo-paciente-…@demo.invalid`, un dominio que el registro público rechaza, y tenants `demo-…`).
 - `api/v1/images.py`: `POST /upload` (paciente), `GET /images` y `GET /images/{id}` (con URL firmada; ajena o inexistente da el mismo 404). Lecturas, subidas y accesos denegados (`image.denied`) auditados.
 - `api/v1/audit.py`: `GET /audit` para `tenant_admin` con filtros `from`, `to`, `actor_id`, `limit` y `offset`.
 - `api/rate_limit.py`: límites por IP y ruta: `/auth/token` 10/min, `/auth/register` 5/min, `/images/upload` 20/min. La IP sale de `api/client_ip.py`: ignora `X-Forwarded-For` salvo con `TRUSTED_PROXY_HOPS` (en Render, `1`; ver ADR 0004).

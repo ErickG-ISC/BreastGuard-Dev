@@ -5,7 +5,8 @@ Uso, desde la raíz del repo (contra la base de DESARROLLO):
     python -m backend.scripts.demo_flow --clean
 
 --create (como app_user, con los mismos servicios que usa la API):
-- registra pacientes SINTÉTICAS en el tenant b2c, siempre con correo `demo-paciente-…@example.com`;
+- registra pacientes SINTÉTICAS en el tenant b2c con correo `demo-paciente-…@demo.invalid`: un
+  dominio reservado que el registro público rechaza, así que ninguna cuenta real puede coincidir;
 - cada una analiza imágenes sintéticas, responde el cuestionario, hace una autoexploración y
   anota en su diario, y comparte un paquete;
 - la doctora del tenant `demo-…` lo importa: quedan casos sospechosos y otros normales.
@@ -13,7 +14,7 @@ Uso, desde la raíz del repo (contra la base de DESARROLLO):
 Los resultados son de GUION: el predictor es un doble con probabilidades fijas y versión
 `demo-guion` (el modelo real no está entrenado). Nunca usar con datos ni imágenes reales.
 
---clean (rol dueño, como purge_tenant): borra SOLO las cuentas `demo-paciente-…@example.com` del
+--clean (rol dueño, como purge_tenant): borra SOLO las cuentas `demo-paciente-…@demo.invalid` del
 b2c, sus datos, sus paquetes y las copias importadas en tenants `demo-…`, y sus archivos.
 """
 
@@ -59,7 +60,8 @@ from backend.app.services.auth import AuthContext, register_patient  # noqa: E40
 from backend.app.services.images import ValidatedImage  # noqa: E402
 
 DEMO_PREFIX = "demo-"
-EMAIL_PATTERN = "demo-paciente-%@example.com"
+DEMO_DOMAIN = "demo.invalid"
+EMAIL_PATTERN = f"demo-paciente-%@{DEMO_DOMAIN}"
 CARD = {
     "model_version": "demo-guion",
     "is_demo": True,
@@ -131,10 +133,11 @@ def create_flow(storage, slug: str, doctor_email: str | None = None) -> FlowResu
 
     for index, (name, age, runs, noticed) in enumerate(PATIENTS):
         with new_session() as control:
+            # model_construct: el dominio reservado no pasa la validación pública (a propósito)
             user = register_patient(
                 control,
-                UserCreate(
-                    email=f"demo-paciente-{uuid.uuid4().hex[:10]}@example.com",
+                UserCreate.model_construct(
+                    email=f"demo-paciente-{uuid.uuid4().hex[:10]}@{DEMO_DOMAIN}",
                     password=secrets.token_urlsafe(18),  # nadie inicia sesión con ella
                     full_name=name,
                     consent_accepted=True,
@@ -336,15 +339,22 @@ def main() -> int:
     print(f"Base de destino: {target.host}:{target.port}/{target.database}")
     try:
         if args.create:
+            typed = input("Esto crea pacientes demo en el b2c de esta base. Escribe 'demo': ")
+            if typed.strip() != "demo":
+                print("Confirmación incorrecta; no se creó nada.", file=sys.stderr)
+                return 1
             result = create_flow(SupabaseStorage(), args.slug, args.doctor_email)
             print(f"Importadas en {args.slug}: {', '.join(result.imported)}")
             print(f"Sospechosas: {', '.join(result.suspicious)}")
             return 0
-        typed = input("Esto borra las pacientes demo-paciente-… y sus copias. Escribe 'demo': ")
+        typed = input(
+            f"Esto borra las pacientes demo-paciente-…@{DEMO_DOMAIN} y sus copias. Escribe 'demo': "
+        )
         if typed.strip() != "demo":
             print("Confirmación incorrecta; no se borró nada.", file=sys.stderr)
             return 1
-        engine = create_engine(os.environ["DATABASE_URL"])
+        # Sin volcar parámetros (ids o correos) si un error llega a la terminal
+        engine = create_engine(os.environ["DATABASE_URL"], hide_parameters=True)
         try:
             deleted = clean_flow(engine, SupabaseStorage())
         finally:

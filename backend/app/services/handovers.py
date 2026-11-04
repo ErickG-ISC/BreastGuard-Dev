@@ -19,7 +19,6 @@ from sqlalchemy.orm import Session, aliased
 
 from backend.app.models.clinical import Patient
 from backend.app.models.control import (
-    InboxNotice,
     PatientHandover,
     ShareEvent,
     SharePackage,
@@ -27,7 +26,7 @@ from backend.app.models.control import (
     User,
 )
 from backend.app.schemas.handovers import HandoverCreate, HandoverOut, PendingHandoverOut
-from backend.app.services import admin_events, audit
+from backend.app.services import admin_events, audit, share_import
 from backend.app.services import email as email_service
 from backend.app.services.auth import AuthContext
 from backend.app.services.tenants import ConflictError, InvalidOperationError, NotFoundError
@@ -283,14 +282,7 @@ def accept(db: Session, auth: AuthContext, handover_id: uuid.UUID, ip: str | Non
                     doctor_name=doctor,
                 )
             )
-            db.add(
-                InboxNotice(
-                    tenant_id=source_tenant_id,
-                    user_id=source_user_id,
-                    kind="share_update",
-                    ref_id=package_id,
-                )
-            )
+            share_import.notify_source(db, source_tenant_id, source_user_id, package_id)
     audit.record(
         db,
         tenant_id=auth.tenant_id,

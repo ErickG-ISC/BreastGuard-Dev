@@ -226,7 +226,7 @@ def search(db: Session, auth: AuthContext, data: PatientSearch, ip: str | None) 
     return PanelPage(items=items, total=total, limit=data.limit, offset=data.offset)
 
 
-def summary(db: Session, auth: AuthContext) -> PanelSummary:
+def summary(db: Session, auth: AuthContext, ip: str | None = None) -> PanelSummary:
     latest = _latest_analysis()
     suspicious = _suspicious_expr(latest)
     row = db.execute(
@@ -239,6 +239,8 @@ def summary(db: Session, auth: AuthContext) -> PanelSummary:
         .outerjoin(latest, literal(True))
         .where(_visible(auth))
     ).one()
+    _audit(db, auth, "case.summary", "patient", None, ip)
+    db.commit()
     return PanelSummary(pending_review=row[0], suspicious=row[1], active=row[2])
 
 

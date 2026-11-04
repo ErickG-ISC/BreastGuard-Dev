@@ -47,7 +47,7 @@ def test_crea_casos_por_el_flujo_real_y_los_limpia(owner_engine, storage, demo):
     assert (
         count(
             owner_engine,
-            "SELECT count(*) FROM control.users WHERE email LIKE 'demo-paciente-%@example.com'",
+            "SELECT count(*) FROM control.users WHERE email LIKE 'demo-paciente-%@demo.invalid'",
         )
         == 0
     )
@@ -87,3 +87,31 @@ def test_solo_tenants_de_demostracion(storage, demo):
 
 def test_sin_cuentas_demo_no_borra_nada(owner_engine, storage, demo):
     assert clean_flow(owner_engine, storage) == {}
+
+
+def test_una_cuenta_real_con_nombre_parecido_no_se_borra(
+    owner_engine, storage, demo, user_factory, b2c_tenant
+):
+    """Revisión de aislamiento: el patrón no coincide con nada registrable por la vía pública."""
+    lookalike = user_factory(b2c_tenant, role="patient", email="demo-paciente-x@example.com")
+    create_flow(storage, "demo-clinica-norte")
+    clean_flow(owner_engine, storage)
+    assert (
+        count(owner_engine, "SELECT count(*) FROM control.users WHERE id = :u", u=lookalike.id) == 1
+    )
+
+
+def test_el_registro_publico_no_acepta_el_dominio_demo(client):
+    response = client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "demo-paciente-1@demo.invalid",
+            "password": "contrasena-segura",
+            "full_name": "x",
+            "consent_accepted": True,
+            "consent_version": "v",
+            "consent_sha256": "a" * 64,
+            "plan_code": "basico",
+        },
+    )
+    assert response.status_code == 422

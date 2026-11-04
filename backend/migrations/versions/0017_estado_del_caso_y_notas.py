@@ -50,7 +50,8 @@ _PREVIOUS_SIDE_WRITES = importlib.import_module(
 _PATIENT_NOTICE_CHECK = (
     "          IF ctx_role <> 'patient' OR NEW.kind <> 'share_received' OR NOT EXISTS ("
 )
-_DOCTOR_NOTICE = """          IF ctx_role = 'doctor' AND NEW.kind = 'share_update' THEN
+_DOCTOR_NOTICE = """          IF TG_OP = 'INSERT' AND ctx_role = 'doctor'
+             AND NEW.kind = 'share_update' THEN
             IF EXISTS (
                  SELECT 1 FROM control.share_packages p
                  WHERE p.id = NEW.ref_id AND p.imported_tenant_id = tenant
