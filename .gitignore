@@ -228,3 +228,7 @@ temp/
 *.onnx
 *.db
 *.sqlite
+
+# Volcados de la base (respaldos antes de la demo): nunca al repositorio
+*.dump
+*.backup

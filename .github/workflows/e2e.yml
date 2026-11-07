@@ -1,0 +1,69 @@
+name: E2E
+
+# Flujos completos con Playwright (e2e/), contra un entorno LOCAL de CI: Postgres efímero, backend
+# con Storage en memoria y predictor de prueba, y Vite. Nunca contra Render ni con datos reales.
+#
+# Va en un workflow aparte para no bloquear la fusión: no lo marques como "required" en la
+# protección de ramas. Si tarda más de lo esperado, se cancela a los 20 minutos.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres # credencial efímera de CI, no es un secreto
+        ports:
+          - 54329:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      TEST_DATABASE_URL: "postgresql://postgres:postgres@localhost:54329/postgres"
+      REQUIRE_POSTGRES: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+            requirements-e2e.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-e2e.txt
+          python -m playwright install --with-deps chromium
+          npm ci --prefix frontend
+
+      - name: Playwright
+        run: pytest e2e -q

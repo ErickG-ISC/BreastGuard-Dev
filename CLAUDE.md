@@ -23,7 +23,8 @@ Prioridad de implementación acordada: **1) multitenencia (CU-12, CU-13), 2) B2C
 - `tests/` — pytest contra **Postgres real** (`pgtest.py`: base temporal y variables de prueba; `conftest.py`: fixtures; `helpers.py`: fábricas; `isolation/`: pruebas de RLS y catálogo)
 - `docker-compose.yml` — Postgres 17 local para pruebas (puerto 54329)
 - `infraestructure/` — reservado para despliegue/IaC; todavía no existe en el repo (git no guarda carpetas vacías). El nombre lleva ese typo a propósito; no renombrar sin avisar
-- `docs/` — casos de uso (`casos-de-uso.md`) y decisiones de arquitectura (`adr/`). El guion de demo está pendiente
+- `docs/` — casos de uso (`casos-de-uso.md`), decisiones de arquitectura (`adr/`) y guion de demo (`demo.md`, con lista previa y plan B)
+- `e2e/` — flujos con Playwright contra un entorno local o de CI (nunca Render): `pytest e2e -q` (`requirements-e2e.txt`); workflow aparte `.github/workflows/e2e.yml`, que no bloquea la fusión
 - `.github/workflows/ci.yml` — CI en cada push y PR: job `backend` (ruff y pytest contra un servicio Postgres 17, Python 3.12, sin TensorFlow) y job `frontend` (`npm ci`, oxlint, build y `npm run check:sw`)
 
 El repo se inicializó con git localmente en la Fase 0 (venía de un ZIP); el remoto se conecta a mano.
@@ -178,7 +179,8 @@ Reglas de infraestructura:
   - `create_platform_admin.py`: como `app_user`, pide la contraseña;
   - `purge_tenant.py`: rol dueño con BYPASSRLS, confirma escribiendo el slug, tiene `--dry-run` y `--pending` (las purgas solicitadas en la UI); conserva `control.admin_events`;
   - `seed_demo.py`: `--create` crea un tenant `demo-…` con personal invitado y pacientes sintéticas como fichas `creado` de la primera médica (como `app_user`, con su contexto); `--clean` lo purga y solo acepta slugs `demo-`;
-  - `check_storage.py`: verifica que el bucket sea privado.
+  - `check_storage.py`: verifica que el bucket sea privado;
+  - `demo_credentials.py`: `--issue` (contraseñas aleatorias de 24 caracteres solo para cuentas sintéticas de demo, impresas una vez), `--check` (ninguna cuenta demo con contraseña débil) y `--lock`. Los scripts de demo exigen `BREASTGUARD_ENV=development`.
 
 ### Frontend (`frontend/src`)
 

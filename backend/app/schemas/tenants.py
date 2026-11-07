@@ -46,6 +46,10 @@ class TenantCreate(BaseModel):
     def slug_not_reserved(cls, value: str) -> str:
         if value in RESERVED_SLUGS:
             raise ValueError("Ese slug está reservado")
+        if value.startswith("demo-"):
+            # Los tenants de demostración solo los crean los scripts (y sus cuentas se tratan
+            # como sintéticas: no deben mezclarse con instituciones reales)
+            raise ValueError("El prefijo demo- está reservado para datos de demostración")
         return value
 
 
