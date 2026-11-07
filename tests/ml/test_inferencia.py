@@ -28,6 +28,7 @@ from backend.app.ml.settings import MLSettings
 SETTINGS = MLSettings()
 CARD3 = {
     "model_version": "fake-3",
+    "preprocessing_version": 1,
     "classes": ["normal", "benigno", "maligno"],
     "input_size": [224, 224],
     "preprocessing": "raw_0_255",

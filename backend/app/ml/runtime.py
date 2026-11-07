@@ -13,6 +13,7 @@ import numpy as np
 from PIL import Image
 
 from backend.app.ml.config import ModelCard
+from backend.app.ml.preprocess import to_tensor
 
 
 @dataclass(frozen=True)
@@ -40,19 +41,14 @@ class Predictor(Protocol):
 
 
 def to_model_input(image: Image.Image, card: ModelCard) -> np.ndarray:
-    """Imagen PIL -> tensor (1, H, W, C) float32 según la ficha del modelo."""
-    mode = "RGB" if card.color_mode == "rgb" else "L"
-    height, width = card.input_size
-    resized = image.convert(mode).resize((width, height), Image.Resampling.BILINEAR)
-    array = np.asarray(resized, dtype=np.float32)
-    if array.ndim == 2:
-        array = array[..., np.newaxis]
-    if card.preprocessing == "scale_0_1":
-        array = array / 255.0
-    elif card.preprocessing == "scale_minus1_1":
-        array = array / 127.5 - 1.0
-    # raw_0_255: el modelo normaliza internamente (EfficientNet de Keras)
-    return array[np.newaxis, ...]
+    """Imagen PIL -> tensor (1, H, W, C) float32 según la ficha (ver ml/preprocess.py)."""
+    return to_tensor(image, card.input_size, card.color_mode, card.preprocessing)
+
+
+def _probabilities(card: ModelCard, raw) -> dict[str, float]:
+    """Salida del modelo -> probabilidades CALIBRADAS por clase canónica (ADR 0014)."""
+    calibrated = card.calibration.apply(np.asarray(raw, dtype=float))
+    return {name: float(p) for name, p in zip(card.classes, calibrated, strict=True)}
 
 
 class LiteRTPredictor:
@@ -86,12 +82,7 @@ class LiteRTPredictor:
             self._interpreter.invoke()
             probs = self._interpreter.get_tensor(self._probs_index)[0].astype(float).copy()
             features = self._interpreter.get_tensor(self._features_index)[0].astype(np.float32)
-        return Prediction(
-            probabilities={
-                name: float(p) for name, p in zip(self.card.classes, probs, strict=True)
-            },
-            features=features,
-        )
+        return Prediction(probabilities=_probabilities(self.card, probs), features=features)
 
     def class_weights(self, class_name: str) -> np.ndarray:
         return self._kernel[:, self.card.classes.index(class_name)]
@@ -114,7 +105,10 @@ class FakePredictor:
         probs = self.probabilities or {
             name: 1.0 / len(self.card.classes) for name in self.card.classes
         }
-        return Prediction(probabilities=dict(probs), features=self._features)
+        if not self.card.calibrated:
+            return Prediction(probabilities=dict(probs), features=self._features)
+        raw = [probs[name] for name in self.card.classes]
+        return Prediction(probabilities=_probabilities(self.card, raw), features=self._features)
 
     def class_weights(self, class_name: str) -> np.ndarray:
         return self._kernel[:, self.card.classes.index(class_name)]
