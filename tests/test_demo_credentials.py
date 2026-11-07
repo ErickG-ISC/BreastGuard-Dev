@@ -6,7 +6,7 @@ from sqlalchemy import text
 from backend.app.services.auth import get_password_hash, verify_password
 from backend.scripts import demo_credentials
 from backend.scripts.demo_credentials import CredentialError, check, issue, lock
-from backend.scripts.demo_env import NotDevelopmentError
+from backend.scripts.demo_env import NotDevelopmentError, database_ref
 from backend.scripts.seed_demo import create_demo
 
 pytestmark = pytest.mark.usefixtures("database")
@@ -15,6 +15,7 @@ pytestmark = pytest.mark.usefixtures("database")
 @pytest.fixture
 def development(monkeypatch):
     monkeypatch.setenv("BREASTGUARD_ENV", "development")
+    monkeypatch.setenv("DEMO_DB_REF", database_ref())
 
 
 @pytest.fixture
@@ -124,3 +125,31 @@ def test_solo_en_desarrollo(monkeypatch):
 
 def test_la_lista_debil_incluye_la_contrasena_de_pruebas():
     assert "contrasena-segura" in demo_credentials.WEAK_PASSWORDS
+
+
+def test_otra_base_se_niega(development, monkeypatch):
+    monkeypatch.setenv("DEMO_DB_REF", "otro-proyecto")
+    with pytest.raises(NotDevelopmentError, match="DEMO_DB_REF"):
+        check()
+
+
+def test_mayusculas_y_dominios_parecidos(owner_engine, demo, tenant_factory, user_factory):
+    tenant = tenant_factory("demo-mayus")
+    shouting = user_factory(tenant, role="doctor", email="Doc.Grande@Example.COM")
+    lookalike = user_factory(tenant, role="doctor", email="doc@example.com.evil")
+    # Mayúsculas: la cuenta sintética sí se emite y se bloquea (como el login, sin distinguir)
+    (issued,) = issue(["doc.grande@example.com"])
+    assert issued.email == shouting.email
+    lock()
+    with owner_engine.connect() as conn:
+        active = dict(
+            conn.execute(
+                text("SELECT email, is_active FROM control.users WHERE email = ANY(:e)"),
+                {"e": [shouting.email, lookalike.email]},
+            ).all()
+        )
+    assert active[shouting.email] is False
+    # Un dominio que solo se parece no es sintético: no se toca
+    assert active[lookalike.email] is True
+    with pytest.raises(CredentialError):
+        issue([lookalike.email])

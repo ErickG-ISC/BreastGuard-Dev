@@ -10,29 +10,34 @@ CLAUDE.md. Todo con **datos sintéticos**: ninguna imagen ni dato de pacientes r
 - [ ] **Migraciones aplicadas** en la base de desarrollo:
   `alembic -c backend/alembic.ini current` debe decir `0018 (head)`. Si no, `upgrade head`.
 - [ ] **CI en verde** en `main`, incluido el workflow E2E.
+- [ ] **Guarda de los scripts de demo:** todos exigen `BREASTGUARD_ENV=development` y
+  `DEMO_DB_REF=<ref>`, el identificador de la base de desarrollo. Con el pooler de Supabase es el
+  sufijo del usuario `postgres.<ref>`. Si no coincide, el script se niega y muestra el valor de
+  `DATABASE_URL`.
 - [ ] **Datos de demo regenerados** por el flujo real; solo crea cuentas `@demo.invalid` y copias
   en tenants `demo-…`:
   ```
-  BREASTGUARD_ENV=development python -m backend.scripts.demo_flow --create --slug demo-clinica-norte --doctor-email demo-clinica-norte-doctor-1@example.com
+  BREASTGUARD_ENV=development DEMO_DB_REF=<ref> python -m backend.scripts.demo_flow --create --slug demo-clinica-norte --doctor-email demo-clinica-norte-doctor-1@example.com
   ```
 - [ ] **Credenciales de demo**, emitidas por ti en tu terminal. Se imprimen una sola vez: anótalas
   fuera del repositorio.
   ```
-  BREASTGUARD_ENV=development python -m backend.scripts.demo_credentials --issue \
+  BREASTGUARD_ENV=development DEMO_DB_REF=<ref> python -m backend.scripts.demo_credentials --issue \
     --email demo-clinica-norte-doctor-1@example.com \
     --email demo-hospital-sur-doctor-1@example.com \
     --email <una paciente demo-paciente-…@demo.invalid>
   ```
   Las pacientes demo están en la base (`control.users`, correo que termina en `@demo.invalid`).
 - [ ] **Sin contraseñas débiles:**
-  `BREASTGUARD_ENV=development python -m backend.scripts.demo_credentials --check` debe terminar
+  `BREASTGUARD_ENV=development DEMO_DB_REF=<ref> python -m backend.scripts.demo_credentials --check` debe terminar
   sin cuentas débiles.
 - [ ] **Respaldo de la base** antes de la demo. El plan gratuito de Supabase no tiene respaldos a
   un punto en el tiempo:
   ```
-  pg_dump "$DATABASE_URL" -Fc -f breastguard-antes-de-demo.dump
+  pg_dump "$DATABASE_URL" -Fc -f ~/respaldos-breastguard/antes-de-demo.dump
   ```
-  Guárdalo fuera del repo; nunca lo subas.
+  Escríbelo fuera del repo (`*.dump` también está en `.gitignore`). Contiene hashes y todos los
+  datos de la base: bórralo cuando ya no lo necesites.
 - [ ] **Material del plan B listo** (ver abajo).
 
 ### Una hora antes
@@ -87,8 +92,8 @@ Frases clave:
 ## Después de la demo
 
 - [ ] Bloquear las cuentas sintéticas:
-  `BREASTGUARD_ENV=development python -m backend.scripts.demo_credentials --lock`.
+  `BREASTGUARD_ENV=development DEMO_DB_REF=<ref> python -m backend.scripts.demo_credentials --lock`.
 - [ ] Si se crearon tenants en vivo, solicitar su purga desde la UI y ejecutarla con
   `purge_tenant.py --pending`.
 - [ ] Opcional, limpiar el escenario demo:
-  `BREASTGUARD_ENV=development python -m backend.scripts.demo_flow --clean`.
+  `BREASTGUARD_ENV=development DEMO_DB_REF=<ref> python -m backend.scripts.demo_flow --clean`.

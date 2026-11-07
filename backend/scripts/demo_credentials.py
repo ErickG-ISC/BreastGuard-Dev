@@ -27,7 +27,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from sqlalchemy import and_, or_, select, update  # noqa: E402
+from sqlalchemy import and_, func, or_, select, update  # noqa: E402
 
 from backend.app.db import new_session  # noqa: E402
 from backend.app.models.control import Invitation, Tenant, User  # noqa: E402
@@ -65,13 +65,13 @@ def _synthetic():
     return or_(
         and_(
             Tenant.slug.startswith(DEMO_TENANT_PREFIX),
-            User.email.endswith("@example.com"),
+            func.lower(User.email).endswith("@example.com"),
             User.role.in_(("doctor", "tenant_admin")),
         ),
         and_(
             Tenant.slug == "b2c",
             User.role == "patient",
-            User.email.endswith(f"@{DEMO_PATIENT_DOMAIN}"),
+            func.lower(User.email).endswith(f"@{DEMO_PATIENT_DOMAIN}"),
         ),
     )
 
@@ -93,7 +93,9 @@ def issue(emails: list[str]) -> list[Issued]:
             row = db.execute(
                 select(User, Tenant.slug)
                 .join(Tenant, Tenant.id == User.tenant_id)
-                .where(User.email == email.lower(), _synthetic(), User.is_active.is_(True))
+                .where(
+                    func.lower(User.email) == email.lower(), _synthetic(), User.is_active.is_(True)
+                )
                 .with_for_update(of=User)
             ).first()
             if row is None:
@@ -138,7 +140,7 @@ def check() -> CheckResult:
                 User.hashed_password.is_not(None),
                 or_(
                     Tenant.slug.startswith(DEMO_TENANT_PREFIX),
-                    User.email.endswith(f"@{DEMO_PATIENT_DOMAIN}"),
+                    func.lower(User.email).endswith(f"@{DEMO_PATIENT_DOMAIN}"),
                 ),
             )
         ).all()

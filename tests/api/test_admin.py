@@ -430,3 +430,21 @@ def test_me_devuelve_el_contexto(client, user_factory, tenant_factory):
         "tenant_slug": "clinica-a",
         "role": "doctor",
     }
+
+
+def test_el_prefijo_demo_esta_reservado(client, user_factory):
+    """Los tenants demo- solo los crean los scripts; sus cuentas se tratan como sintéticas."""
+    from tests.helpers import auth_headers
+
+    root = user_factory(role="platform_admin")
+    response = client.post(
+        "/api/v1/admin/tenants",
+        json={
+            "name": "Clínica real",
+            "slug": "demo-clinica-real",
+            "admin_email": "admin@clinica.example.com",
+            "admin_full_name": "Admin",
+        },
+        headers=auth_headers(root),
+    )
+    assert response.status_code == 422
