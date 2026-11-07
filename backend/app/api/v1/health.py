@@ -5,9 +5,14 @@
   - `ok`: iguales;
   - `ahead`: la base tiene una revisión que este código no conoce (se migró antes de desplegar,
     que es el orden correcto): responde 200;
-  - `behind`: la base está atrasada respecto del código (o no se puede leer la revisión):
-    responde **503**, así Render no da por bueno un despliegue sin migrar y deja el anterior;
+  - `behind`: la base está atrasada respecto del código (o `app_user` no tiene permiso para leer
+    la revisión, es decir, falta la 0019): responde **503**, así Render no da por bueno un
+    despliegue sin migrar y deja el anterior;
+  - `unknown`: otro error al leer la revisión con la base accesible: 200 (un fallo transitorio
+    no saca de servicio a una instancia sana; queda en el log);
 - `model` y `model_version`.
+
+Las revisiones concretas solo van al log: no ayudan a ningún cliente.
 
 Nunca expone host, usuario, cadena de conexión ni detalles de error (solo el tipo, en el log).
 """
@@ -17,11 +22,13 @@ import os
 from functools import lru_cache
 from pathlib import Path
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Depends, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 
 from backend.app.api.deps import ControlDb
+from backend.app.api.rate_limit import rate_limit
 from backend.app.ml.deps import Inference
 
 logger = logging.getLogger(__name__)
@@ -56,38 +63,54 @@ def migration_state(db_revision: str | None) -> str:
     return "behind"
 
 
-@router.get("/health")
-def health_check(db: ControlDb, inference: Inference):
+# Generoso: Render consulta el health check cada pocos segundos
+HEALTH_LIMIT = Depends(rate_limit("health", 120, 60))
+INSUFFICIENT_PRIVILEGE = "42501"
+UNKNOWN = "unknown"
+
+
+def _read_revision(db) -> tuple[str | None, bool]:
+    """(revisión, base accesible). Una sola consulta en el caso normal."""
+    try:
+        return db.execute(text("SELECT version_num FROM public.alembic_version")).scalar(), True
+    except DBAPIError as exc:
+        db.rollback()
+        if getattr(exc.orig, "pgcode", None) == INSUFFICIENT_PRIVILEGE:
+            return None, True  # sin la 0019: la base está atrasada respecto del código
+        logger.error("Health check: no se pudo leer la revisión (%s)", type(exc).__name__)
+    except Exception as exc:
+        db.rollback()
+        logger.error("Health check: no se pudo leer la revisión (%s)", type(exc).__name__)
+    # ¿La base responde? Si sí, la revisión solo es "desconocida" (no se saca de servicio)
     try:
         db.execute(text("SELECT 1"))
+        return UNKNOWN, True
     except Exception as exc:
         # El detalle va al log; la respuesta no expone host ni cadena de conexión
         logger.error("Health check: la base de datos no responde (%s)", type(exc).__name__)
+        return None, False
+
+
+@router.get("/health", dependencies=[HEALTH_LIMIT])
+def health_check(db: ControlDb, inference: Inference):
+    db_revision, reachable = _read_revision(db)
+    if not reachable:
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             content={"status": "error", "database": "unavailable", "version": deployed_version()},
         )
-    try:
-        db_revision = db.execute(text("SELECT version_num FROM public.alembic_version")).scalar()
-    except Exception as exc:
-        # Sin permiso de lectura (0019 sin aplicar) también es "atrasada"
-        logger.error("Health check: no se pudo leer la revisión (%s)", type(exc).__name__)
-        db.rollback()
-        db_revision = None
-    migration = migration_state(db_revision)
-    head, _ = code_revisions()
+    migration = UNKNOWN if db_revision == UNKNOWN else migration_state(db_revision)
     body = {
-        "status": "ok" if migration != "behind" else "error",
+        "status": "error" if migration == "behind" else "ok",
         "database": "connected",
         "version": deployed_version(),
         "migration": migration,
-        "schema_revision": db_revision,
-        "code_revision": head,
         "model": "loaded" if inference.available else "unavailable",
     }
     if inference.available:
         body["model_version"] = inference.predictor.card.model_version
     if migration == "behind":
+        head, _ = code_revisions()
         logger.error(
             "Health check: la base (%s) está atrasada respecto del código (%s)", db_revision, head
         )

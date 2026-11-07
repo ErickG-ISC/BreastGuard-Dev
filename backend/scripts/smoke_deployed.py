@@ -93,8 +93,9 @@ def run(api: str, web: str | None, fetch: Fetch = http_fetch) -> list[tuple[bool
     check(
         body.get("model") == "loaded", f"modelo {body.get('model')} {body.get('model_version', '')}"
     )
+    health_text = health.body.decode("utf-8", "replace").lower()
     check(
-        "postgres" not in health.body.decode("utf-8", "replace").lower(),
+        not any(word in health_text for word in ("postgres", "supabase", "pooler", "password")),
         "health sin datos de conexión",
     )
     checks.append((True, f"versión desplegada {body.get('version')}"))
@@ -146,6 +147,9 @@ def main() -> None:
     parser.add_argument("--api", required=True, help="URL del backend, sin /api/v1")
     parser.add_argument("--web", help="URL del frontend (Vercel)")
     args = parser.parse_args()
+    for url in filter(None, (args.api, args.web)):
+        if not url.startswith(("https://", "http://")):
+            parser.error(f"URL inválida (solo http o https): {url}")
     checks = run(args.api, args.web)
     for ok, text in checks:
         print(f"[{'OK ' if ok else 'FALLA'}] {text}")

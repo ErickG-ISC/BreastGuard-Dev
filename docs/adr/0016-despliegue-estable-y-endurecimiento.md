@@ -12,11 +12,11 @@ falta revisar secretos, dependencias, cabeceras y logs.
 ### Health y orden "migrar antes de desplegar"
 - `GET /api/v1/health` devuelve:
   - `version`: el commit, de `RENDER_GIT_COMMIT[:7]`, o `dev`;
-  - `migration`: `ok`, `ahead` o `behind`;
-  - `schema_revision` y `code_revision`;
+  - `migration`: `ok`, `ahead`, `behind` o `unknown`;
   - `model` y `model_version`.
 
-  Nunca devuelve el host, el usuario ni el detalle de un error; esos van al log, solo como tipo.
+  Nunca devuelve el host, el usuario, el detalle de un error ni las revisiones concretas; esos van al log (los errores, solo como tipo). Tiene un límite de 120 por minuto por IP, holgado para el chequeo de Render, y hace una sola consulta en el caso normal.
+- **Fallo transitorio:** un error al leer la revisión con la base accesible da `unknown` y 200. No saca de servicio a una instancia sana. En cambio, la falta de permiso (código 42501, es decir, la 0019 sin aplicar) cuenta como `behind`.
 - **Migración 0019:** `GRANT SELECT ON public.alembic_version` a `app_user` (solo lectura). La Data API sigue sin acceso.
 - **Base atrasada:** si la base está **atrasada** respecto del código (o la revisión no se puede leer), `/health` responde **503**. Render usa `/api/v1/health` como health check: un despliegue sin migrar no pasa y queda el anterior.
 - **Base adelantada:** `ahead` (base más nueva que el código) responde 200. Es justo lo que ocurre al migrar antes de desplegar.

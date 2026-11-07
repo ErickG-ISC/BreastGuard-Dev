@@ -11,13 +11,12 @@ def test_health_ok(client, monkeypatch):
     response = client.get("/api/v1/health")
     assert response.status_code == 200
     head, _ = code_revisions()
+    assert head not in response.text  # las revisiones solo van al log
     assert response.json() == {
         "status": "ok",
         "database": "connected",
         "version": "0123456",
         "migration": "ok",
-        "schema_revision": head,
-        "code_revision": head,
         "model": "loaded",
         "model_version": "fake-3c-1",
     }
@@ -45,7 +44,7 @@ def test_base_atrasada_responde_503(client, owner_engine):
         response = client.get("/api/v1/health")
         assert response.status_code == 503
         body = response.json()
-        assert body["migration"] == "behind" and body["schema_revision"] == "0018"
+        assert body["migration"] == "behind" and "schema_revision" not in body
         assert "postgres" not in response.text.lower()
     finally:
         with owner_engine.begin() as conn:
@@ -72,6 +71,9 @@ def test_health_sin_base_503_sin_detalles(client):
     class BrokenSession:
         def execute(self, *args, **kwargs):
             raise OperationalError("SELECT 1", {}, Exception("host secreto:5432"))
+
+        def rollback(self):
+            pass
 
     app.dependency_overrides[get_control_db] = lambda: BrokenSession()
 
