@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from backend.app.api.client_ip import client_ip
 from backend.app.api.deps import ControlDb, Storage, TenantDb, require_role
 from backend.app.api.rate_limit import rate_limit
+from backend.app.api.v1.exports import download
 from backend.app.ml.deps import Inference
 from backend.app.schemas.cases import (
     CaseNoteIn,
@@ -32,7 +33,14 @@ from backend.app.schemas.cases import (
 )
 from backend.app.schemas.handovers import HandoverAccepted, PendingHandoverOut
 from backend.app.schemas.shares import InboxNoticeOut, ShareImport, ShareImported
-from backend.app.services import cases, doctor_analyses, handovers, notices, share_import
+from backend.app.services import (
+    cases,
+    doctor_analyses,
+    handovers,
+    notices,
+    reports,
+    share_import,
+)
 from backend.app.services.auth import AuthContext
 from backend.app.services.tenants import NotFoundError
 
@@ -200,3 +208,21 @@ def save_review(
         mine=True,
         updated_at=review.updated_at or review.created_at,
     )
+
+
+# CU-10: exportar un análisis REVISADO de una ficha de la que es responsable (ADR 0015)
+EXPORT_LIMIT = Depends(rate_limit("doctor_export", 10, 60))
+
+
+@router.get("/analyses/{analysis_id}/report.pdf", dependencies=[EXPORT_LIMIT])
+def export_pdf(
+    analysis_id: uuid.UUID, auth: DoctorUser, db: TenantDb, storage: Storage, request: Request
+):
+    return download(reports.export_doctor_pdf(db, storage, auth, analysis_id, client_ip(request)))
+
+
+@router.get("/analyses/{analysis_id}/report.hl7", dependencies=[EXPORT_LIMIT])
+def export_hl7(
+    analysis_id: uuid.UUID, auth: DoctorUser, db: TenantDb, storage: Storage, request: Request
+):
+    return download(reports.export_doctor_hl7(db, storage, auth, analysis_id, client_ip(request)))

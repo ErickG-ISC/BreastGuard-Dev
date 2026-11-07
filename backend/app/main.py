@@ -73,6 +73,8 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # El frontend lee el nombre del archivo de una exportación (CU-10); no lleva datos personales
+    expose_headers=["Content-Disposition"],
 )
 
 

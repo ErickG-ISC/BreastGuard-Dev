@@ -18,9 +18,10 @@ from fastapi import (
 from backend.app.api.client_ip import client_ip
 from backend.app.api.deps import Storage, TenantDb, require_role
 from backend.app.api.rate_limit import rate_limit
+from backend.app.api.v1.exports import download
 from backend.app.ml.deps import Inference
 from backend.app.schemas.analysis import AnalysisDetailOut, AnalysisOut, AnalysisPage
-from backend.app.services import analyses
+from backend.app.services import analyses, reports
 from backend.app.services.auth import AuthContext
 from backend.app.services.images import read_and_validate_image
 
@@ -113,3 +114,14 @@ def delete_analysis(
 ):
     analyses.delete(db, storage, auth, analysis_id, client_ip(request))
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get(
+    "/{analysis_id}/report.pdf",
+    dependencies=[Depends(rate_limit("analyses_export", 10, 60))],
+)
+def export_pdf(
+    analysis_id: uuid.UUID, auth: PatientUser, db: TenantDb, storage: Storage, request: Request
+):
+    """PDF sencillo de SU resultado (CU-10 opcional): el mismo reporte que ve en la app."""
+    return download(reports.export_patient_pdf(db, storage, auth, analysis_id, client_ip(request)))

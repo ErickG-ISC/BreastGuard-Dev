@@ -33,11 +33,16 @@ def record(
     resource_type: str | None = None,
     resource_id: uuid.UUID | None = None,
     ip: str | None = None,
+    entry_id: uuid.UUID | None = None,
 ) -> None:
-    """Inserta un registro; RLS exige que tenant_id y actor_id coincidan con el contexto."""
+    """Inserta un registro; RLS exige que tenant_id y actor_id coincidan con el contexto.
+
+    `entry_id` permite que un documento exportado lleve el id de SU registro de auditoría como
+    identificador del reporte (CU-10): el reporte y la auditoría se rastrean entre sí.
+    """
     db.execute(
         insert(AuditLog).values(
-            id=uuid.uuid4(),
+            id=entry_id or uuid.uuid4(),
             tenant_id=tenant_id,
             actor_id=actor_id,
             actor_role=actor_role,
