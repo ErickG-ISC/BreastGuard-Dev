@@ -5,8 +5,11 @@ las peticiones que esperen más de queue_timeout_seconds reciben 503.
 """
 
 import asyncio
+import ctypes
+import ctypes.util
 import io
 import logging
+import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -30,6 +33,29 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:  # solo para anotaciones; pydicom se importa al primer DICOM
     from backend.app.ml.dicom import DerivedImage
+
+
+def _load_malloc_trim():
+    """`malloc_trim` de glibc (solo Linux, como en Render); en otro sistema no hace nada."""
+    if not sys.platform.startswith("linux"):
+        return None
+    try:
+        return ctypes.CDLL(ctypes.util.find_library("c") or "libc.so.6").malloc_trim
+    except (OSError, AttributeError):
+        return None
+
+
+_MALLOC_TRIM = _load_malloc_trim()
+
+
+def release_memory() -> None:
+    """Devuelve al sistema la memoria libre del heap nativo tras un estudio DICOM.
+
+    Los decodificadores (openjpeg, RLE) reservan bloques grandes fuera de Python; sin esto el
+    proceso conserva el pico del estudio anterior y dos estudios seguidos se suman (ADR 0013).
+    """
+    if _MALLOC_TRIM is not None:
+        _MALLOC_TRIM(0)
 
 
 class ModelOutputError(RuntimeError):
@@ -186,4 +212,7 @@ class InferenceService:
                     detail="No se pudo analizar la imagen. Intenta de nuevo más tarde.",
                 ) from None
         finally:
+            if convert_in_thread:
+                # Antes de soltar el turno: el siguiente estudio no hereda este pico
+                await run_in_threadpool(release_memory)
             self._semaphore.release()

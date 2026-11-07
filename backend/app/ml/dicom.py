@@ -150,7 +150,10 @@ def _window(ds, values: np.ndarray) -> np.ndarray:
         raise DicomError("La cabecera del DICOM tiene valores no válidos.") from None
     if not (math.isfinite(slope) and math.isfinite(intercept)) or slope == 0:
         raise DicomError("La cabecera del DICOM tiene valores no válidos.")
-    values = values * slope + intercept
+    # `values` es la copia reducida (float32) de `_downscale`: se opera EN SU LUGAR, sin
+    # temporales del tamaño de la imagen
+    values *= slope
+    values += intercept
     try:
         center = float(_first(ds.get("WindowCenter")))
         width = float(_first(ds.get("WindowWidth")))
@@ -163,16 +166,21 @@ def _window(ds, values: np.ndarray) -> np.ndarray:
         low, high = center - width / 2, center + width / 2
     if high <= low:
         raise DicomError("La imagen es uniforme; no se puede analizar.")
-    scaled = np.clip((values - low) / (high - low), 0.0, 1.0)
+    values -= low
+    values /= high - low
+    np.clip(values, 0.0, 1.0, out=values)
     if str(ds.PhotometricInterpretation) == "MONOCHROME1":
-        scaled = 1.0 - scaled  # en MONOCHROME1 el valor mínimo es blanco
-    return (scaled * 255.0 + 0.5).astype(np.uint8)
+        np.subtract(1.0, values, out=values)  # en MONOCHROME1 el valor mínimo es blanco
+    values *= 255.0
+    values += 0.5
+    return values.astype(np.uint8)
 
 
 def derive_image(data: bytes) -> DerivedImage:
     """Valida y convierte un DICOM en una imagen derivada. Lanza DicomError si no se admite."""
     from pydicom import dcmread
     from pydicom.errors import InvalidDicomError
+    from pydicom.pixels import pixel_array
 
     if len(data) > MAX_DICOM_BYTES:
         raise DicomError(f"El archivo supera el máximo de {MAX_DICOM_BYTES // (1024 * 1024)} MB.")
@@ -186,12 +194,9 @@ def derive_image(data: bytes) -> DerivedImage:
 
     started = time.monotonic()
     try:
-        ds = dcmread(io.BytesIO(data))
-        if "PixelData" not in ds:
-            raise DicomError("El archivo no contiene una imagen.")
-        pixels = ds.pixel_array
-    except DicomError:
-        raise
+        # Directo del archivo: no se arma un Dataset con una segunda copia de PixelData en
+        # memoria (ADR 0013). Sin PixelData también cae aquí.
+        pixels = pixel_array(io.BytesIO(data))
     except Exception:  # decodificadores nativos: cualquier fallo es "archivo dañado"
         raise DicomError("No se pudo decodificar la imagen del DICOM.") from None
     elapsed = time.monotonic() - started
@@ -199,11 +204,11 @@ def derive_image(data: bytes) -> DerivedImage:
         # No se puede interrumpir a media decodificación; el tope real son tamaño y dimensiones
         logger.warning("Decodificación DICOM lenta (%.1f s); rechazada", elapsed)
         raise DicomError("El estudio tardó demasiado en procesarse.")
-    if pixels.ndim != 2 or pixels.shape != (int(ds.Rows), int(ds.Columns)):
+    if pixels.ndim != 2 or pixels.shape != (int(header.Rows), int(header.Columns)):
         raise DicomError("La imagen decodificada no coincide con su cabecera.")
 
     reduced = _downscale(pixels)
-    del pixels, ds  # liberar la matriz completa antes de la ventana
+    del pixels  # liberar la matriz completa antes de la ventana
     derived = Image.fromarray(_window(header, reduced), mode="L")
     buffer = io.BytesIO()
     derived.save(buffer, format="PNG")  # sin metadatos: se construye desde los píxeles

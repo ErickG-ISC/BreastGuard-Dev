@@ -37,7 +37,9 @@ DICOM_TYPES = {"application/dicom", "application/octet-stream"}
 STUDY_TYPES = {"ecografia", "mastografia"}
 # Estudios en vuelo (lectura + espera + análisis): cada uno puede tener 60 MB en memoria.
 # El semáforo de la inferencia solo cubre el análisis; este acota también la lectura.
-MAX_STUDIES_IN_FLIGHT = 2
+# Con 2, el peor caso medido (dos JPEG 2000 de 4096×4096) es 419 MB de 512 (ADR 0013); si Render
+# muestra presión de memoria, MAX_STUDIES_IN_FLIGHT=1 lo baja a ~357 MB sin tocar el código.
+MAX_STUDIES_IN_FLIGHT = max(1, int(os.environ.get("MAX_STUDIES_IN_FLIGHT", "2")))
 SLOT_WAIT_SECONDS = 20
 _studies = asyncio.Semaphore(MAX_STUDIES_IN_FLIGHT)
 

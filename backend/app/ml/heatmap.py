@@ -39,12 +39,18 @@ def _colormap(values: np.ndarray) -> np.ndarray:
     return (np.stack([red, green, blue], axis=-1) * 255).astype(np.uint8)
 
 
+# El mapa de calor redimensionado es uint8: basta con colorear sus 256 valores una vez. Aplicar
+# `_colormap` píxel a píxel a una mastografía derivada (2048 px) creaba varias matrices float32
+# de ~16 MB y un `stack` de ~48 MB (ADR 0013); con la tabla el resultado es idéntico y solo uint8.
+_JET_LUT = _colormap(np.arange(256, dtype=np.float32) / 255.0)  # (256, 3)
+
+
 def overlay(image: Image.Image, cam: np.ndarray, alpha: float = OVERLAY_ALPHA) -> bytes:
     base = image.convert("RGB")
     heat = Image.fromarray((cam * 255).astype(np.uint8), mode="L").resize(
         base.size, Image.Resampling.BILINEAR
     )
-    colored = Image.fromarray(_colormap(np.asarray(heat, dtype=np.float32) / 255.0), mode="RGB")
+    colored = Image.fromarray(_JET_LUT[np.asarray(heat)], mode="RGB")
     blended = Image.blend(base, colored, alpha)
     buffer = io.BytesIO()
     blended.save(buffer, format="PNG", optimize=True)
