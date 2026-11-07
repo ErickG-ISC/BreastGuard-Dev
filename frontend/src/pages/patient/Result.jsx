@@ -16,6 +16,7 @@ import {
 import { useCallback, useEffect, useState } from 'react';
 import { Link as RouterLink, useLocation, useParams } from 'react-router-dom';
 import { api, errorMessage } from '../../api/client';
+import { downloadError, downloadFile } from '../../api/download';
 import { CLASS_LABELS, LEVEL_SEVERITY, formatDate, resultLabel } from './analysisLabels';
 
 function HeatmapViewer({ imageUrl, heatmapUrl, onExpired }) {
@@ -122,6 +123,8 @@ export default function Result() {
           </Paper>
         )}
 
+        <PatientPdfButton analysisId={analysis.id} />
+
         <Accordion disableGutters>
           <AccordionSummary>
             <Typography variant="body2">Ver detalle técnico</Typography>
@@ -159,5 +162,30 @@ export default function Result() {
         </Stack>
       </Stack>
     </>
+  );
+}
+
+// CU-10 (opcional): PDF sencillo de SU resultado, el mismo reporte que ve aquí.
+function PatientPdfButton({ analysisId }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  async function get() {
+    setBusy(true);
+    setError('');
+    try {
+      await downloadFile(`/analyses/${analysisId}/report.pdf`);
+    } catch (err) {
+      setError(await downloadError(err, 'No se pudo descargar el PDF.'));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Stack spacing={1}>
+      <Button variant="outlined" onClick={get} disabled={busy} sx={{ alignSelf: 'start' }}>
+        {busy ? 'Preparando…' : 'Descargar PDF'}
+      </Button>
+      {error && <Alert severity="error">{error}</Alert>}
+    </Stack>
   );
 }

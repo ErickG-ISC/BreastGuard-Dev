@@ -194,3 +194,34 @@ def test_d_acerca_del_modelo_en_movil(stack, new_page):
     # La ficha de prueba no trae métricas: la sección no aparece
     expect(page.get_by_role("heading", name="Métricas en el conjunto de prueba")).to_have_count(0)
     assert page.evaluate("document.documentElement.scrollWidth") <= 390
+
+
+def test_e_la_medica_descarga_pdf_y_hl7(stack, new_page):
+    """CU-10: tras asignar el BI-RADS, la médica descarga el PDF y el HL7 simulado."""
+    patient, analysis_id = patient_with_analysis(stack, "Ana Sintética E")
+    clinic = insert_tenant(stack.owner, "clinica-e2e-e")
+    doctor = insert_user(stack.owner, clinic, role="doctor")
+    pid = share_and_import_by_api(stack, patient, analysis_id, doctor)
+
+    page = new_page()
+    login(page, doctor.email, "/medico")
+    page.goto(f"{WEB}/medico/pacientes/{pid}")
+    pdf_button = page.get_by_role("button", name="Descargar PDF")
+    expect(pdf_button).to_be_disabled()  # sin revisión no se exporta
+    notice = "simulación, no probada contra un sistema hospitalario"
+    expect(page.get_by_text(notice)).to_be_visible()
+
+    page.get_by_label("Categoría BI-RADS asignada por la médica").click()
+    page.get_by_role("option", name="4A", exact=False).first.click()
+    page.get_by_role("button", name="Guardar revisión").click()
+    expect(pdf_button).to_be_enabled()
+
+    with page.expect_download() as pdf:
+        pdf_button.click()
+    assert re.fullmatch(r"breastguard-reporte-[0-9a-f]{8}\.pdf", pdf.value.suggested_filename)
+    assert open(pdf.value.path(), "rb").read(4) == b"%PDF"
+
+    with page.expect_download() as hl7:
+        page.get_by_role("button", name="Descargar HL7").click()
+    assert hl7.value.suggested_filename.endswith(".hl7")
+    assert open(hl7.value.path(), "rb").read().startswith(b"MSH|^~\&|")

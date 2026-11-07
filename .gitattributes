@@ -7,3 +7,4 @@
 *.pdf binary
 *.onnx binary
 *.tflite binary
+*.ttf binary
