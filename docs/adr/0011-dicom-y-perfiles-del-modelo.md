@@ -71,6 +71,22 @@ gratuito tiene ~512 MB de RAM.
      `reviewed_by`, con una política que solo deja poner el propio id).
    - El PDF y el HL7 llegan en la Semana 5.
 
+8. **Revisión de aislamiento** (sin hallazgos críticos; los medios se corrigieron):
+   - **Lista blanca cerrada en `dicom_meta`:** la modalidad, la vista y la lateralidad se
+     guardan solo si son códigos conocidos; un texto libre (que podría ser un nombre) queda en
+     `null`.
+   - **Memoria:**
+     - el middleware `BodySizeLimit` rechaza con 413, antes de leer, todo cuerpo mayor que
+       60 MB + 1 MB (FastAPI procesa el multipart antes de las dependencias);
+     - como máximo 2 estudios en vuelo, con la lectura incluida; si no hay lugar en 20 s, 503.
+   - **Falla cerrado:** un DICOM sin modalidad se trata como mastografía. En JPG o PNG la médica
+     declara si es ecografía o mastografía. Un perfil desconocido muestra el aviso.
+   - **Datos grabados en los píxeles:** si el DICOM no lo declara, el servidor no puede
+     detectarlos. La médica confirma en cada subida que la imagen no muestra datos personales
+     (requerido también por el servidor). Es una limitación consciente.
+   - **Errores:** una cabecera mal formada da 422, no 500. Dos primeras revisiones simultáneas
+     dan 409.
+
 ## Memoria (medida)
 
 Docker `python:3.12-slim` con `--memory=512m` y `requirements.txt` completo

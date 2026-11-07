@@ -46,6 +46,11 @@ ALLOWED_TRANSFER_SYNTAXES = {
 }
 JPEG_LOSSLESS = {"1.2.840.10008.1.2.4.57", "1.2.840.10008.1.2.4.70"}
 PHOTOMETRIC = {"MONOCHROME1", "MONOCHROME2"}
+# Lista blanca CERRADA: un valor fuera de estos códigos se guarda como None (nunca texto libre,
+# que podría traer un nombre o un ID)
+MODALITIES = {"MG", "US", "CR", "DX"}
+VIEWS = {"CC", "MLO", "ML", "LM", "LMO", "XCCL", "XCCM", "FB", "SIO", "AT", "RL", "RM"}
+LATERALITIES = {"L", "R", "B", "U"}
 
 
 class DicomError(ValueError):
@@ -63,10 +68,9 @@ def is_dicom(data: bytes) -> bool:
     return len(data) > 132 and data[128:132] == b"DICM"
 
 
-def _text(value) -> str | None:
-    if value is None or value == "":
-        return None
-    return str(value).strip()[:16] or None
+def _code(value, allowed: set[str]) -> str | None:
+    text = str(_first(value) or "").strip().upper()
+    return text if text in allowed else None
 
 
 def _first(value):
@@ -89,6 +93,16 @@ def _floats(value, count: int) -> list[float] | None:
 
 
 def _header_checks(ds) -> str:
+    """Valida la cabecera; un valor mal formado (p. ej. Rows no numérico) es DicomError, no 500."""
+    try:
+        return _check_header(ds)
+    except DicomError:
+        raise
+    except (TypeError, ValueError, KeyError, AttributeError):
+        raise DicomError("La cabecera del DICOM tiene valores no válidos.") from None
+
+
+def _check_header(ds) -> str:
     transfer = str(ds.file_meta.get("TransferSyntaxUID", ""))
     if transfer in JPEG_LOSSLESS:
         raise DicomError(
@@ -129,8 +143,13 @@ def _downscale(pixels: np.ndarray) -> np.ndarray:
 
 
 def _window(ds, values: np.ndarray) -> np.ndarray:
-    slope = float(ds.get("RescaleSlope", 1) or 1)
-    intercept = float(ds.get("RescaleIntercept", 0) or 0)
+    try:
+        slope = float(_first(ds.get("RescaleSlope", 1)) or 1)
+        intercept = float(_first(ds.get("RescaleIntercept", 0)) or 0)
+    except (TypeError, ValueError):
+        raise DicomError("La cabecera del DICOM tiene valores no válidos.") from None
+    if not (math.isfinite(slope) and math.isfinite(intercept)) or slope == 0:
+        raise DicomError("La cabecera del DICOM tiene valores no válidos.")
     values = values * slope + intercept
     try:
         center = float(_first(ds.get("WindowCenter")))
@@ -191,9 +210,11 @@ def derive_image(data: bytes) -> DerivedImage:
 
     spacing = _floats(header.get("PixelSpacing") or header.get("ImagerPixelSpacing") or [], 2)
     meta = {
-        "modality": _text(header.get("Modality")),
-        "view_position": _text(header.get("ViewPosition")),
-        "laterality": _text(header.get("ImageLaterality") or header.get("Laterality")),
+        "modality": _code(header.get("Modality"), MODALITIES),
+        "view_position": _code(header.get("ViewPosition"), VIEWS),
+        "laterality": _code(
+            header.get("ImageLaterality") or header.get("Laterality"), LATERALITIES
+        ),
         "pixel_spacing_mm": spacing,
         "rows": int(header.Rows),
         "columns": int(header.Columns),

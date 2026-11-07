@@ -36,10 +36,24 @@ def world(tenant_factory, user_factory, owner_engine):
     return data
 
 
-def upload(client, user, pid, data: bytes, name="estudio.dcm", content_type="application/dicom"):
+def upload(
+    client,
+    user,
+    pid,
+    data: bytes,
+    name="estudio.dcm",
+    content_type="application/dicom",
+    *,
+    confirm=True,
+    study_type=None,
+):
+    form = {"confirm_no_identifiers": "true" if confirm else "false"}
+    if study_type:
+        form["study_type"] = study_type
     return client.post(
         f"/api/v1/doctor/patients/{pid}/analyses",
         files={"file": (name, data, content_type)},
+        data=form,
         headers=auth_headers(user),
     )
 
@@ -99,7 +113,13 @@ class TestEstudioDicom:
 
     def test_jpg_y_png_usan_el_perfil_de_ecografia(self, client, owner_engine, world):
         response = upload(
-            client, world["doc1"], world["pid"], ultrasound_png(), "eco.png", "image/png"
+            client,
+            world["doc1"],
+            world["pid"],
+            ultrasound_png(),
+            "eco.png",
+            "image/png",
+            study_type="ecografia",
         )
         assert response.status_code == 201
         (analysis,) = rows(owner_engine, "analyses", world["a"].id)
@@ -245,3 +265,69 @@ class TestAltaManual:
     )
     def test_entrada_invalida(self, client, world, payload):
         assert call(client, "post", "/patients", world["doc1"], json=payload).status_code == 422
+
+
+class TestRevisionDeAislamiento:
+    """Hallazgos medios de la revisión de la rama D."""
+
+    def test_valores_de_cabecera_fuera_de_la_lista_blanca_no_se_guardan(
+        self, client, owner_engine, world
+    ):
+        hostile = make_dicom(ViewPosition="DOE^JANE", ImageLaterality="ID123", Modality="MG")
+        assert upload(client, world["doc1"], world["pid"], hostile).status_code == 201
+        (analysis,) = rows(owner_engine, "analyses", world["a"].id)
+        assert analysis["dicom_meta"]["view_position"] is None
+        assert analysis["dicom_meta"]["laterality"] is None
+        assert "DOE" not in json.dumps(analysis["dicom_meta"])
+
+    def test_sin_confirmacion_de_datos_personales_no_se_analiza(self, client, owner_engine, world):
+        response = upload(client, world["doc1"], world["pid"], make_dicom(), confirm=False)
+        assert response.status_code == 422
+        assert rows(owner_engine, "analyses", world["a"].id) == []
+
+    def test_jpg_exige_el_tipo_y_la_mastografia_lleva_el_aviso(self, client, owner_engine, world):
+        png = ultrasound_png()
+        missing = upload(client, world["doc1"], world["pid"], png, "m.png", "image/png")
+        assert missing.status_code == 422
+        bogus = upload(
+            client, world["doc1"], world["pid"], png, "m.png", "image/png", study_type="otra"
+        )
+        assert bogus.status_code == 422
+        ok = upload(
+            client, world["doc1"], world["pid"], png, "m.png", "image/png", study_type="mastografia"
+        )
+        assert ok.status_code == 201
+        (item,) = call(client, "get", f"/patients/{world['pid']}", world["doc1"]).json()["analyses"]
+        assert (
+            item["profile"] == "mastografia_prototipo" and "Prototipo" in item["prototype_warning"]
+        )
+
+    def test_dicom_sin_modalidad_se_trata_como_mastografia(self, client, owner_engine, world):
+        upload(client, world["doc1"], world["pid"], make_dicom(Modality=""))
+        (analysis,) = rows(owner_engine, "analyses", world["a"].id)
+        assert analysis["profile"] == "mastografia_prototipo"
+
+    def test_cabecera_mal_formada_da_422(self, client, owner_engine, world):
+        response = upload(client, world["doc1"], world["pid"], make_dicom(RescaleSlope="NaN"))
+        assert response.status_code == 422
+
+    def test_cuerpo_demasiado_grande_se_rechaza_antes_de_leer(self, client, world):
+        response = client.post(
+            f"/api/v1/doctor/patients/{world['pid']}/analyses",
+            content=b"x",
+            headers={
+                **auth_headers(world["doc1"]),
+                "content-type": "multipart/form-data; boundary=x",
+                "content-length": str(200 * 1024 * 1024),
+            },
+        )
+        assert response.status_code == 413
+
+    def test_sin_lugar_para_otro_estudio_responde_503(self, client, world, monkeypatch):
+        import asyncio
+
+        from backend.app.services import doctor_analyses
+
+        monkeypatch.setattr(doctor_analyses, "_studies", asyncio.Semaphore(0))
+        monkeypatch.setattr(doctor_analyses, "SLOT_WAIT_SECONDS", 0.05)
+        assert upload(client, world["doc1"], world["pid"], make_dicom()).status_code == 503

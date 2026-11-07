@@ -24,8 +24,18 @@ MAMMOGRAPHY = Profile("mastografia_prototipo", "mammography", "Mastografía", PR
 PROFILES = {p.code: p for p in (ULTRASOUND, MAMMOGRAPHY)}
 
 
-def profile_for(*, is_dicom: bool, modality: str | None) -> Profile:
-    """JPG o PNG y DICOM de ecografía (US): perfil de ecografía. Cualquier otro DICOM: prototipo."""
-    if not is_dicom or (modality or "").upper() == "US":
-        return ULTRASOUND
-    return MAMMOGRAPHY
+def profile_for(*, is_dicom: bool, modality: str | None, declared: str | None = None) -> Profile:
+    """Falla cerrado: solo es ecografía lo que lo dice con certeza.
+
+    - DICOM: ecografía solo con `Modality=US`; sin modalidad o con otra, prototipo.
+    - JPG o PNG: lo declara la médica (`ecografia` o `mastografia`); sin declarar, prototipo.
+    """
+    if is_dicom:
+        return ULTRASOUND if (modality or "").upper() == "US" else MAMMOGRAPHY
+    return ULTRASOUND if declared == "ecografia" else MAMMOGRAPHY
+
+
+def warning_for(code: str | None) -> str | None:
+    """Aviso de un perfil guardado; un perfil desconocido lleva el aviso (falla cerrado)."""
+    profile = PROFILES.get(code or "")
+    return profile.warning if profile is not None else PROTOTYPE_WARNING

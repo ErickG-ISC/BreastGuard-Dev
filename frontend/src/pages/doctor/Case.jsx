@@ -4,6 +4,7 @@ import {
   Button,
   Card,
   CardContent,
+  Checkbox,
   Chip,
   CircularProgress,
   Dialog,
@@ -11,6 +12,7 @@ import {
   DialogContent,
   DialogTitle,
   FormControl,
+  FormControlLabel,
   Grid,
   InputLabel,
   Link,
@@ -169,13 +171,24 @@ function TechnicalReport({ analysis, onSave, busy, disabled }) {
 }
 
 // Carga de estudios de la médica (D03): DICOM, JPG o PNG. El original DICOM nunca se guarda.
+function isDicomName(name) {
+  return /\.(dcm|dicom)$/i.test(name ?? '');
+}
+
 function StudyUpload({ onUpload, busy, disabled }) {
   const [file, setFile] = useState(null);
+  const [studyType, setStudyType] = useState('');
+  const [confirmed, setConfirmed] = useState(false);
   const inputRef = useRef(null);
+  const dicom = isDicomName(file?.name);
+  const ready = file && confirmed && (dicom || studyType);
+
   async function submit(event) {
     event.preventDefault();
-    if (await onUpload(file)) {
+    if (await onUpload(file, { confirmed, studyType: dicom ? null : studyType })) {
       setFile(null);
+      setStudyType('');
+      setConfirmed(false);
       if (inputRef.current) inputRef.current.value = '';
     }
   }
@@ -197,7 +210,25 @@ function StudyUpload({ onUpload, busy, disabled }) {
           {file.name} · {(file.size / 1024 / 1024).toFixed(1)} MB
         </Typography>
       )}
-      <Button type="submit" variant="contained" disabled={!file || busy || disabled} sx={{ alignSelf: 'flex-start' }}>
+      {file && !dicom && (
+        <FormControl size="small" sx={{ maxWidth: 280 }}>
+          <InputLabel id="tipo-estudio">Tipo de estudio</InputLabel>
+          <Select
+            labelId="tipo-estudio"
+            label="Tipo de estudio"
+            value={studyType}
+            onChange={(e) => setStudyType(e.target.value)}
+          >
+            <MenuItem value="ecografia">Ecografía</MenuItem>
+            <MenuItem value="mastografia">Mastografía (prototipo)</MenuItem>
+          </Select>
+        </FormControl>
+      )}
+      <FormControlLabel
+        control={<Checkbox checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />}
+        label="Confirmo que la imagen no muestra nombre, ID ni otros datos personales."
+      />
+      <Button type="submit" variant="contained" disabled={!ready || busy || disabled} sx={{ alignSelf: 'flex-start' }}>
         {busy ? 'Analizando…' : 'Analizar estudio'}
       </Button>
       <Typography variant="caption" color="text.secondary">
@@ -481,9 +512,11 @@ export default function Case() {
             <StudyUpload
               busy={busy}
               disabled={handoverBlocks}
-              onUpload={(file) => {
+              onUpload={(file, { confirmed, studyType }) => {
                 const form = new FormData();
                 form.append('file', file);
+                form.append('confirm_no_identifiers', confirmed ? 'true' : 'false');
+                if (studyType) form.append('study_type', studyType);
                 return run(
                   () => api.post(`/doctor/patients/${id}/analyses`, form).then(() => setSelected(0)),
                   'Estudio analizado. El caso vuelve a pendiente.',

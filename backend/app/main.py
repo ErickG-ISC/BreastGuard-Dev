@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend.app.api.body_limit import BodySizeLimit
 from backend.app.api.v1 import (
     admin,
     analyses,
@@ -63,6 +64,8 @@ app = FastAPI(lifespan=lifespan)
 frontend_origins = parse_origins(os.environ.get("FRONTEND_ORIGIN"))
 # Los orígenes no son secretos: se registran para poder verificar CORS en los logs de Render
 logger.warning("CORS: orígenes permitidos %s", frontend_origins)
+# Antes que CORS: así el 413 también lleva las cabeceras CORS (el último agregado es el exterior)
+app.add_middleware(BodySizeLimit)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=frontend_origins,

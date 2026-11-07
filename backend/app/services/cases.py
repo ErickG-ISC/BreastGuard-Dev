@@ -20,7 +20,7 @@ from sqlalchemy import and_, case, delete, func, literal, or_, select, update
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
-from backend.app.ml.profiles import PROFILES
+from backend.app.ml.profiles import warning_for
 from backend.app.ml.settings import get_settings
 from backend.app.models.clinical import (
     Analysis,
@@ -337,9 +337,7 @@ def get_case(
                 image_url=image_url,
                 heatmap_url=heatmap_url,
                 dicom_meta=analysis.dicom_meta,
-                prototype_warning=PROFILES[analysis.profile].warning
-                if analysis.profile in PROFILES
-                else None,
+                prototype_warning=warning_for(analysis.profile),
                 review=_review_out(reviews.get(analysis.id), reviewers, auth),
             )
         )

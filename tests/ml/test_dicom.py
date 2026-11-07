@@ -131,4 +131,18 @@ class TestPerfiles:
 
     def test_ecografias_y_jpg(self):
         assert profile_for(is_dicom=True, modality="US") is ULTRASOUND
-        assert profile_for(is_dicom=False, modality=None) is ULTRASOUND
+        assert profile_for(is_dicom=False, modality=None, declared="ecografia") is ULTRASOUND
+
+    def test_falla_cerrado(self):
+        assert profile_for(is_dicom=True, modality=None) is MAMMOGRAPHY
+        assert profile_for(is_dicom=False, modality=None) is MAMMOGRAPHY
+
+
+class TestCabecerasHostiles:
+    def test_valores_mal_formados_son_dicom_error(self):
+        with pytest.raises(DicomError):
+            derive_image(make_dicom(RescaleSlope="inf"))
+
+    def test_solo_codigos_de_la_lista_blanca(self):
+        derived = derive_image(make_dicom(ViewPosition="PEREZ^ANA", Modality="XX"))
+        assert derived.meta["view_position"] is None and derived.meta["modality"] is None

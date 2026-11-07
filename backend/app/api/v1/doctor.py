@@ -11,7 +11,7 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 
 from backend.app.api.client_ip import client_ip
 from backend.app.api.deps import ControlDb, Storage, TenantDb, require_role
@@ -176,11 +176,15 @@ async def add_analysis(
     inference: Inference,
     request: Request,
     file: UploadFile = File(...),
+    confirm_no_identifiers: bool = Form(False),
+    study_type: str | None = Form(None),
 ):
-    upload = await doctor_analyses.read_upload(file)
-    analysis = await doctor_analyses.add_analysis(
-        db, storage, inference, auth, patient_id, upload, client_ip(request)
-    )
+    doctor_analyses.check_form(confirm_no_identifiers, study_type)
+    async with doctor_analyses.study_slot():
+        upload = await doctor_analyses.read_upload(file, study_type)
+        analysis = await doctor_analyses.add_analysis(
+            db, storage, inference, auth, patient_id, upload, client_ip(request)
+        )
     return CreatedOut(id=analysis.id)
 
 
