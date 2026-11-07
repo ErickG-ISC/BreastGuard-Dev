@@ -20,7 +20,10 @@ HIS o RIS real contra el cual probar. Opcionalmente, la paciente descarga su res
   - la médica usa `cases._visible` y debe ser la **responsable**. Con un traspaso pendiente, la de destino ve el caso pero recibe 409 al exportar;
   - la paciente usa `analyses._own`.
 - **Ajeno o inexistente:** el mismo 404, con `case.denied` o `analysis.denied`. Pacientes y administradoras reciben 403 en las rutas de la médica.
-- **Solo un análisis revisado:** la médica exporta si ya asignó el BI-RADS (y su recomendación). Si no, 409 "Asigna el BI-RADS…".
+- **Solo un análisis revisado:** con un BI-RADS asignado por una médica; si no, 409 "Asigna el BI-RADS…".
+  - Tras un traspaso aceptado, la nueva responsable puede exportar la revisión de la anterior. El reporte dice quién la hizo ("Revisado por") y la ex responsable ya no ve el análisis (404).
+  - Los 409 se auditan como `case.export_denied`, sin contenido. Los 404 se registran como `case.denied`, con el id del análisis.
+- **Conexión:** la transacción se suelta antes de descargar de Storage y de generar el archivo, porque el pool es chico. La auditoría va en otra transacción con el mismo contexto.
 - **Mapa de calor:** se descarga con `storage.download_bytes` solo si su ruta tiene el prefijo `{tenant_slug}/`. El HL7 no lo descarga.
 - **Auditoría** sin contenido clínico: `case.export_pdf`, `case.export_hl7` y `analysis.export_pdf`.
   - **El id del registro de auditoría es el `report_id`** que lleva el documento (MSH-10 en HL7, el pie en el PDF). Así un reporte se rastrea hasta su exportación sin agregar columnas a `audit_log` (`audit.record(entry_id=…)`).

@@ -230,3 +230,74 @@ class TestPdfDeLaPaciente:
                 f"/api/v1/analyses/{uuid.uuid4()}/report.pdf", headers=auth_headers(intruder)
             )
             assert real.status_code == missing.status_code == 404
+
+
+class TestRevisionDeAislamiento:
+    """Casos que pidió la revisión de aislamiento de la rama (ADR 0015)."""
+
+    def test_los_409_se_auditan_sin_contenido(self, client, world, owner_engine):
+        assert export(client, world["doc1"], world["aid"], "pdf").status_code == 409
+        [entry] = audit_rows(owner_engine, "case.export_denied")
+        assert entry["resource_type"] == "analysis"
+        assert entry["resource_id"] == world["aid"]
+
+    def test_denegado_registra_el_analisis(self, client, world, owner_engine):
+        review(client, world["doc1"], world["aid"])
+        export(client, world["outsider"], world["aid"], "pdf")
+        [entry] = audit_rows(owner_engine, "case.denied")
+        assert entry["resource_type"] == "analysis"
+
+    def test_ex_responsable_tras_traspaso_aceptado_404(self, client, world):
+        from tests.api.test_handovers import accept
+
+        review(client, world["doc1"], world["aid"])
+        handover = create_handover(client, world["admin"], world["doc1"], world["doc2"]).json()
+        assert accept(client, world["doc2"], handover["id"]).status_code == 200
+        assert export(client, world["doc1"], world["aid"], "pdf").status_code == 404
+        # La nueva responsable exporta; el reporte dice quién hizo la revisión
+        assert export(client, world["doc2"], world["aid"], "hl7").status_code == 200
+
+    def test_hl7_resiste_inyeccion(self, client, world, owner_engine):
+        hostile = "Ana\rMSH|^~\&|FALSO\nOBX|99|ST|x\u2028y ~&^|\\"
+        with owner_engine.begin() as conn:
+            from sqlalchemy import text
+
+            conn.execute(
+                text("UPDATE clinical.patients SET display_name = :n WHERE id = :i"),
+                {"n": hostile, "i": world["pid"]},
+            )
+        name_users(owner_engine, {world["doc1"].id: "Dra.|Inyección^\r\nPID|x"})
+        review(client, world["doc1"], world["aid"], recommendation=hostile)
+        message = export(client, world["doc1"], world["aid"], "hl7").content.decode()
+        segs = validate_oru_r01(message)
+        assert [s[0] for s in segs].count("MSH") == 1
+        assert [s[0] for s in segs].count("PID") == 1
+        assert len([s for s in segs if s[0] == "OBX"]) == len(segs) - 3
+        assert message.count("\r") == len(segs)
+
+    def test_paciente_con_ruta_fuera_del_prefijo_404(
+        self, client, user_factory, b2c_tenant, owner_engine
+    ):
+        from sqlalchemy import text
+
+        ana = user_factory(b2c_tenant, role="patient")
+        created = patient_upload(client, ana).json()
+        with owner_engine.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE clinical.analyses SET heatmap_path = 'otro/heatmaps/x.png' "
+                    "WHERE id = :i"
+                ),
+                {"i": created["id"]},
+            )
+        response = client.get(
+            f"/api/v1/analyses/{created['id']}/report.pdf", headers=auth_headers(ana)
+        )
+        assert response.status_code == 404
+
+    def test_metadatos_del_pdf_sin_datos_personales(self, client, world):
+        pypdf = pytest.importorskip("pypdf")
+        review(client, world["doc1"], world["aid"])
+        content = export(client, world["doc1"], world["aid"], "pdf").content
+        meta = pypdf.PdfReader(io.BytesIO(content)).metadata
+        assert "Lucía" not in str(dict(meta)) and "Ana Responsable" not in str(dict(meta))

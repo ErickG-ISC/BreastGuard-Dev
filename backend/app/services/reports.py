@@ -6,7 +6,8 @@ Reglas, iguales para todo formato:
   la médica, solo análisis de fichas de las que es RESPONSABLE (`cases._visible` + responsable;
   con un traspaso pendiente la de destino ve el caso pero no lo exporta); la paciente, solo los
   suyos (`analyses._own`). Ajeno o inexistente: el mismo 404 y un registro `*.denied`;
-- la médica exporta solo un análisis REVISADO (BI-RADS y recomendación suyos): si no, 409;
+- la médica exporta solo un análisis REVISADO (con BI-RADS asignado por una médica, que figura
+  como autora en el reporte): si no, 409. Los 409 también se auditan (`case.export_denied`);
 - el mapa de calor se descarga solo si su ruta tiene el prefijo del tenant;
 - cada exportación queda en la auditoría (`case.export_pdf`, `case.export_hl7`,
   `analysis.export_pdf`) sin contenido clínico, y el id de ese registro ES el `report_id` que
@@ -18,6 +19,7 @@ import logging
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
+from typing import NoReturn
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -101,11 +103,20 @@ def _warnings(analysis: Analysis) -> tuple[str, ...]:
     return tuple(items)
 
 
-def _heatmap(storage: SupabaseStorage, db: Session, analysis: Analysis) -> bytes:
+def _refuse(db: Session, auth: AuthContext, analysis_id, ip, code: int, detail: str) -> NoReturn:
+    """Rechazo auditado sin contenido: `case.denied` (404 uniforme, ajeno o inexistente) o
+    `case.export_denied` (409: traspaso pendiente o sin revisión)."""
+    db.rollback()
+    action = "case.denied" if code == status.HTTP_404_NOT_FOUND else "case.export_denied"
+    cases._audit(db, auth, action, "analysis", analysis_id, ip)
+    db.commit()
+    raise HTTPException(status_code=code, detail=detail)
+
+
+def _heatmap(storage: SupabaseStorage, path: str) -> bytes:
     try:
-        return storage.download_bytes(analysis.heatmap_path)
+        return storage.download_bytes(path)
     except StorageError:
-        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="No se pudo preparar el reporte. Intenta de nuevo.",
@@ -134,22 +145,22 @@ def doctor_report(
         )
         .where(Analysis.id == analysis_id, cases._visible(auth))
     ).first()
+    not_found, conflict = status.HTTP_404_NOT_FOUND, status.HTTP_409_CONFLICT
     if row is None:
-        cases._deny(db, auth, analysis_id, ip, detail=ANALYSIS_NOT_FOUND)
+        _refuse(db, auth, analysis_id, ip, not_found, ANALYSIS_NOT_FOUND)
     analysis, patient = row
     if patient.responsible_doctor_id != auth.user_id:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=NEEDS_HANDOVER)
+        _refuse(db, auth, analysis_id, ip, conflict, NEEDS_HANDOVER)
     if not analysis.heatmap_path.startswith(f"{auth.tenant_slug}/"):
         logger.error("Análisis con rutas fuera del prefijo de su tenant (id=%s)", analysis_id)
-        cases._deny(db, auth, analysis_id, ip, detail=ANALYSIS_NOT_FOUND)
+        _refuse(db, auth, analysis_id, ip, not_found, ANALYSIS_NOT_FOUND)
     review = db.scalar(select(AnalysisReview).where(AnalysisReview.analysis_id == analysis.id))
     if review is None or not review.birads:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=NEEDS_REVIEW)
+        _refuse(db, auth, analysis_id, ip, conflict, NEEDS_REVIEW)
     names = cases._names(db, {review.reviewed_by})
     now = datetime.now(UTC)
-    data = ReportData(
+    heatmap_path = analysis.heatmap_path
+    data = dict(
         report_id=uuid.uuid4(),
         issued_at=now,
         institution=_institution(db, auth),
@@ -167,13 +178,16 @@ def doctor_report(
         is_demo="demo_notice" in (analysis.report or {}),
         analysis_status=analysis.status,
         warnings=_warnings(analysis),
-        heatmap_png=_heatmap(storage, db, analysis) if with_heatmap else None,
         birads=review.birads,
         recommendation=review.recommendation,
         reviewer_name=names.get(review.reviewed_by, "Médica"),
         reviewed_at=review.updated_at or review.created_at,
     )
-    return data
+    # Se suelta la transacción (y la conexión del pool, que es chico) antes de ir a Storage y
+    # generar el archivo; la auditoría abre otra transacción con el mismo contexto
+    db.rollback()
+    heatmap = _heatmap(storage, heatmap_path) if with_heatmap else None
+    return ReportData(**data, heatmap_png=heatmap)
 
 
 def patient_report(
@@ -183,7 +197,8 @@ def patient_report(
     analysis, _image = analyses._load(db, auth, analysis_id, ip)
     patient = db.scalar(select(Patient).where(Patient.id == analysis.patient_id))
     now = datetime.now(UTC)
-    return ReportData(
+    heatmap_path = analysis.heatmap_path  # prefijo ya validado por analyses._load
+    data = dict(
         report_id=uuid.uuid4(),
         issued_at=now,
         institution="BreastGuard",
@@ -201,9 +216,10 @@ def patient_report(
         is_demo="demo_notice" in (analysis.report or {}),
         analysis_status=analysis.status,
         warnings=_warnings(analysis),
-        heatmap_png=_heatmap(storage, db, analysis),
         plain_report=analysis.report,
     )
+    db.rollback()  # suelta la conexión antes de Storage y del PDF (ver doctor_report)
+    return ReportData(**data, heatmap_png=_heatmap(storage, heatmap_path))
 
 
 def _profile_label(code: str | None) -> str:
