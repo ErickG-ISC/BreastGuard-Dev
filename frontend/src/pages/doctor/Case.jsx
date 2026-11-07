@@ -29,6 +29,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link as RouterLink, useParams } from 'react-router-dom';
 import { api, errorMessage } from '../../api/client';
+import { downloadError, downloadFile } from '../../api/download';
 import { DISCLAIMER } from '../../components/Layout';
 import {
   BIRADS,
@@ -167,8 +168,43 @@ function TechnicalReport({ analysis, onSave, busy, disabled }) {
         )}
       </Stack>
       <Typography variant="caption" color="text.secondary">
-        El modelo no asigna ni sugiere BI-RADS. La exportación a PDF y HL7 llega en la Semana 5.
+        El modelo no asigna ni sugiere BI-RADS.
       </Typography>
+      <ExportButtons analysis={analysis} disabled={disabled || !review} />
+    </Stack>
+  );
+}
+
+// CU-10: exportar el análisis REVISADO. El HL7 es una simulación (ADR 0015).
+function ExportButtons({ analysis, disabled }) {
+  const [busy, setBusy] = useState('');
+  const [error, setError] = useState('');
+  async function get(fmt) {
+    setBusy(fmt);
+    setError('');
+    try {
+      await downloadFile(`/doctor/analyses/${analysis.id}/report.${fmt}`);
+    } catch (err) {
+      setError(await downloadError(err, 'No se pudo descargar el reporte.'));
+    } finally {
+      setBusy('');
+    }
+  }
+  return (
+    <Stack spacing={1}>
+      <Stack direction="row" sx={{ gap: 1, flexWrap: 'wrap' }}>
+        <Button variant="outlined" disabled={disabled || !!busy} onClick={() => get('pdf')}>
+          {busy === 'pdf' ? 'Preparando…' : 'Descargar PDF'}
+        </Button>
+        <Button variant="outlined" disabled={disabled || !!busy} onClick={() => get('hl7')}>
+          {busy === 'hl7' ? 'Preparando…' : 'Descargar HL7'}
+        </Button>
+      </Stack>
+      <Typography variant="caption" color="text.secondary">
+        HL7 v2 (ORU^R01): simulación, no probada contra un sistema hospitalario.
+        {disabled && ' Para exportar, guarda primero tu revisión con la categoría BI-RADS.'}
+      </Typography>
+      {error && <Alert severity="error">{error}</Alert>}
     </Stack>
   );
 }
