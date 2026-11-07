@@ -26,3 +26,7 @@ pydicom==3.0.2
 pylibjpeg==2.1.0
 pylibjpeg-openjpeg==2.6.0
 pylibjpeg-rle==2.2.0
+# Reportes PDF (CU-10, ADR 0015): Python puro. fpdf2 es LGPL-3.0 (se usa como librería, sin
+# modificarla); fonttools (MIT) es su dependencia. Fuente DejaVu Sans en backend/app/content/fonts
+fpdf2==2.9.0
+fonttools==4.68.0
