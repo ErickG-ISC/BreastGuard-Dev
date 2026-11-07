@@ -97,7 +97,10 @@ function Viewer({ analysis }) {
         <Chip color={resultColor(analysis)} label={resultText(analysis)} />
         <Typography variant="body2">Confianza {percent(analysis.confidence)}</Typography>
         <Typography variant="body2" color="text.secondary">
-          Modelo {analysis.model_version}
+          Modelo {analysis.model_version} ·{' '}
+          <Link component={RouterLink} to="/acerca-del-modelo">
+            Acerca del modelo
+          </Link>
         </Typography>
       </Stack>
       {meta && (

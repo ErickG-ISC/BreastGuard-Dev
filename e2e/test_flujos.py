@@ -181,3 +181,16 @@ def test_c_otro_tenant_no_accede(stack, new_page):
     expect(admin_page.get_by_text(doctor_a.email)).to_have_count(0)
     clinical = stack.http.get(f"{API}/doctor/patients/{pid}", headers=auth_headers(admin_b))
     assert clinical.status_code == 403
+
+
+def test_d_acerca_del_modelo_en_movil(stack, new_page):
+    """Página pública: solo lo que trae la ficha y el aviso de mastografía, a 390 px."""
+    page = new_page(390, 844)
+    page.goto(f"{WEB}/acerca-del-modelo")
+    expect(page.get_by_role("heading", name="Acerca del modelo")).to_be_visible()
+    expect(page.get_by_text("no está validado para mastografías")).to_be_visible()
+    expect(page.get_by_text("Modelo de demostración sin entrenar")).to_be_visible()
+    expect(page.get_by_text("fake-3c-1")).to_be_visible()
+    # La ficha de prueba no trae métricas: la sección no aparece
+    expect(page.get_by_role("heading", name="Métricas en el conjunto de prueba")).to_have_count(0)
+    assert page.evaluate("document.documentElement.scrollWidth") <= 390
