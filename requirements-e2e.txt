@@ -1,0 +1,3 @@
+# Pruebas de extremo a extremo (e2e/, workflow e2e.yml). No van en requirements.txt ni en Render.
+-r requirements-dev.txt
+playwright==1.64.0
