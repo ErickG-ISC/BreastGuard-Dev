@@ -242,7 +242,7 @@ Reglas que nunca se rompen:
 
 Estado: **modelo de demostración** (EfficientNet-B0 sin entrenar, 3 clases, `is_demo: true`); el modelo real con BUSI aún no existe. Reentrenar o entrenar se hace FUERA de este repo; limitarlo a 3-4 días en la semana 5. Ver ADR 0006.
 
-- **Producción sin TensorFlow.** La inferencia corre con **LiteRT** (`ai-edge-litert`): pico de 184 MB de RSS con la app completa, frente a ~443 MB de TensorFlow solo, medido en Docker con 512 MB. TensorFlow está solo en `requirements-ml.txt`, para `backend/ml_tools/` (`build_demo_model`, `measure_memory`, `upload_model`).
+- **Producción sin TensorFlow.** La inferencia corre con **LiteRT** (`ai-edge-litert`). Medido en Docker con 512 MB (ADR 0013): 187 MB con la app y una ecografía; 304–357 MB con una mastografía de 4096 px; 419 MB en el peor caso (2 JPEG 2000 a la vez; válvula `MAX_STUDIES_IN_FLIGHT=1`). TensorFlow con la app llega a 479 MB: no cabe. Paridad Keras↔LiteRT con `ml_tools/parity.py` y huella en `tests/fixtures/parity_<version>.json` (el CI verifica que el preprocesamiento da los mismos tensores). TensorFlow está solo en `requirements-ml.txt`, para `backend/ml_tools/` (`build_demo_model`, `measure_memory`, `upload_model`).
 - **`model_card.json`** es la única fuente de clases (2 o 3, con alias benign/malignant), tamaño de entrada, preprocesamiento (`raw_0_255` para el EfficientNet de Keras, que normaliza **dentro**), `model_version` y sha256 de cada archivo.
 - **Carga:** el modelo se carga **una sola vez** en el lifespan, desde `MODEL_DIR` o descargado del bucket privado `MODEL_BUCKET/MODEL_PREFIX`. Si falla, `/health` muestra `model: unavailable` y el análisis responde 503.
 - **`backend/app/ml/`:**

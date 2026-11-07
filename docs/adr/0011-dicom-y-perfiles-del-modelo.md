@@ -104,6 +104,9 @@ textura, de 12 bits:
 - Con 5000 px el peor caso llegaba a ~409 MB, por encima del margen de 400 MB que se fijó. Por eso
   **el límite es 4096 px**: cubre las mastografías habituales (3328×4096) y deja el peor caso en
   ~290 MB.
+- **Corrección (ADR 0013):** esa suma no incluía el mapa de calor sobre la imagen derivada de
+  2048 px. Medido todo junto con el modelo cargado, el pico llegaba a 429–486 MB. Tras los
+  cambios del ADR 0013 queda en 304–357 MB con un estudio y 419 MB con dos JPEG 2000 a la vez.
 
 ## Consecuencias
 
