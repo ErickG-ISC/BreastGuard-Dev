@@ -54,7 +54,7 @@ imagen derivada de 2048 px**, y no sobre los 480×640 de una ecografía:
 4. **`malloc_trim(0)` tras cada estudio DICOM** (`ml/service.py`, solo en Linux), antes de soltar el turno del semáforo.
    - Los decodificadores nativos (openjpeg, RLE) reservan bloques grandes fuera de Python. Sin el trim, el segundo estudio heredaba el pico del primero.
    - Con 2 JPEG 2000 bajó de 438 a 419 MB.
-5. **Escape sin tocar código:** `MAX_STUDIES_IN_FLIGHT` sale del entorno, con 2 por defecto. Con 1, el peor caso es el de un estudio, 357 MB. El estudio que llega mientras otro está en curso espera hasta 20 s y luego recibe 503.
+5. **Escape sin tocar código:** `MAX_STUDIES_IN_FLIGHT` sale del entorno (1 o 2, 2 por defecto; otro valor impide arrancar). Con 1, el peor caso es el de un estudio, 357 MB. El estudio que llega mientras otro está en curso espera hasta 20 s y luego recibe 503.
 
 ## Paridad LiteRT contra Keras
 `ml_tools/parity.py` usa 24 imágenes sintéticas fijas, con semilla, de 6 tamaños y 4 texturas:

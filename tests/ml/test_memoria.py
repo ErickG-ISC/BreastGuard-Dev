@@ -83,3 +83,27 @@ def test_el_servicio_libera_memoria_tras_cada_dicom(monkeypatch, predictor):
         asyncio.run(svc.analyze_dicom(b"no es un dicom"))
     assert exc.value.status_code == 422
     assert len(calls) == 2  # también cuando el estudio falla
+
+
+def test_el_turno_se_devuelve_aunque_falle_la_liberacion(monkeypatch, predictor):
+    from backend.app.ml.service import InferenceService
+    from backend.app.ml.settings import MLSettings
+
+    def broken():
+        raise RuntimeError("falla simulada")
+
+    monkeypatch.setattr(service, "release_memory", broken)
+    svc = InferenceService(predictor, MLSettings())
+    with pytest.raises(RuntimeError):
+        asyncio.run(svc.analyze_dicom(make_dicom(rows=600, cols=480)))
+    monkeypatch.setattr(service, "release_memory", lambda: None)
+    asyncio.run(svc.analyze_dicom(make_dicom(rows=600, cols=480)))  # el turno sigue libre
+
+
+@pytest.mark.parametrize("value", ["0", "3", "x"])
+def test_max_studies_fuera_de_rango_no_arranca(monkeypatch, value):
+    from backend.app.services import doctor_analyses
+
+    monkeypatch.setenv("MAX_STUDIES_IN_FLIGHT", value)
+    with pytest.raises(RuntimeError):
+        doctor_analyses._max_studies()

@@ -6,7 +6,6 @@ las peticiones que esperen más de queue_timeout_seconds reciben 503.
 
 import asyncio
 import ctypes
-import ctypes.util
 import io
 import logging
 import sys
@@ -40,9 +39,14 @@ def _load_malloc_trim():
     if not sys.platform.startswith("linux"):
         return None
     try:
-        return ctypes.CDLL(ctypes.util.find_library("c") or "libc.so.6").malloc_trim
+        trim = ctypes.CDLL("libc.so.6").malloc_trim
     except (OSError, AttributeError):
+        # Sin glibc (p. ej. musl/Alpine): la app funciona, pero sin esta mitigación
+        logger.warning("malloc_trim no disponible; la memoria tras un DICOM no se devuelve")
         return None
+    trim.argtypes = [ctypes.c_size_t]
+    trim.restype = ctypes.c_int
+    return trim
 
 
 _MALLOC_TRIM = _load_malloc_trim()
@@ -212,7 +216,10 @@ class InferenceService:
                     detail="No se pudo analizar la imagen. Intenta de nuevo más tarde.",
                 ) from None
         finally:
-            if convert_in_thread:
-                # Antes de soltar el turno: el siguiente estudio no hereda este pico
-                await run_in_threadpool(release_memory)
-            self._semaphore.release()
+            try:
+                if convert_in_thread:
+                    # Antes de soltar el turno: el siguiente estudio no hereda este pico
+                    await run_in_threadpool(release_memory)
+            finally:
+                # Aunque la liberación se cancele o falle, el turno SIEMPRE se devuelve
+                self._semaphore.release()
