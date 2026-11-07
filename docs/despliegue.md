@@ -2,6 +2,20 @@
 
 El backend va en **Render** (plan gratuito, unos 512 MB) y el frontend en **Vercel**. La base de datos y Storage están en **Supabase**. Nada de esto requiere commitear secretos.
 
+## Procedimiento de cada despliegue (ADR 0016)
+1. **Migra primero**, desde tu computadora, con la URL del dueño de tu `.env` local (Session pooler): `alembic -c backend/alembic.ini upgrade head`, y luego `alembic -c backend/alembic.ini current` para confirmar `head`.
+2. **Push a `main`.** Render y Vercel despliegan solos.
+   - Render espera a que `/api/v1/health` responda 200 antes de enviar tráfico a la versión nueva.
+   - Si la base quedó **atrasada**, `/health` responde 503 con `"migration": "behind"`. El despliegue falla y queda la versión anterior: migra y vuelve a desplegar.
+3. **Smoke test** de solo lectura (sin login; solo GET y un preflight OPTIONS):
+   `python -m backend.scripts.smoke_deployed --api https://<tu-api>.onrender.com --web https://<tu-app>.vercel.app`
+4. Revisa en `/api/v1/health` lo siguiente:
+   - `version`: el commit;
+   - `migration`: `ok`, o `ahead` si migraste algo que el código aún no conoce;
+   - `model` y `model_version`.
+
+Arranque en frío: Render gratuito duerme el servicio tras unos 15 minutos sin tráfico y tarda alrededor de 1 minuto en despertar. El cron de recordatorios (`*/15`) lo mantiene despierto casi siempre. Como GitHub puede retrasarlo, **despiértalo a mano antes de la demo** (`docs/demo.md`). Las 750 horas mensuales del plan alcanzan para un servicio encendido todo el mes.
+
 ## 0. Antes de desplegar (una vez, desde tu computadora)
 1. Migra la base, siempre a mano y nunca en el build de Render: `alembic -c backend/alembic.ini upgrade head`.
 2. Revisa en Supabase que tanto `medical_images` como `ml-models` sean buckets **privados**. Para el primero puedes usar `python -m backend.scripts.check_storage`.
@@ -34,6 +48,9 @@ La app **no arranca** (falla cerrado, es intencional):
 ## 2. Frontend en Vercel
 1. **Add New → Project** y elige el repo, con **Root Directory** `frontend`. Framework: Vite.
 2. Variable de entorno: `VITE_API_URL=https://<tu-api>.onrender.com/api/v1`.
+   - La CSP de `vercel.json` solo permite conectarse a `https://*.onrender.com` y `https://*.supabase.co`.
+   - Si la API cambia de proveedor, actualiza `connect-src`; si no, el navegador bloquea las llamadas.
+   - Cabeceras de `vercel.json`: CSP, nosniff, Referrer-Policy, X-Frame-Options, Permissions-Policy y COOP. Las verifica el smoke test.
 3. Despliega. `vercel.json` reescribe todas las rutas a `index.html`, que es una SPA.
 4. Vuelve a Render y confirma que `FRONTEND_ORIGIN` coincide con el dominio de Vercel, con `https://` (los espacios y la `/` final se ignoran). Los *previews* de Vercel tienen otro dominio y quedarán bloqueados por CORS: es lo esperado.
 
@@ -80,7 +97,15 @@ python -m backend.scripts.purge_tenant --pending             # pide escribir cad
 - **backend**: levanta un servicio `postgres:17` en el puerto 54329 y define `TEST_DATABASE_URL`. `tests/pgtest.py` crea una base temporal, aplica las migraciones con Alembic y crea el rol de prueba de la app (`bg_app_test`, NOSUPERUSER NOBYPASSRLS), así que las pruebas de RLS corren contra Postgres real, igual que en local con `docker compose up -d db`. `REQUIRE_POSTGRES=1` hace que fallen (en vez de omitirse) si la base no responde. Luego `ruff check`, `ruff format --check` y `pytest -q`.
 - **frontend**: `npm ci`, `npm run lint` (oxlint), `npm run build` y `npm run check:sw`, que verifica que el service worker solo precachee archivos estáticos y no guarde respuestas de la API ni imágenes.
 
+Workflows aparte, que **no** bloquean la fusión (no los marques como *required*):
+- `e2e.yml`: Playwright contra un entorno local de CI;
+- `audit.yml`: `pip-audit` y `npm audit --audit-level=high` en cada push y cada lunes. Falla solo ante vulnerabilidades nuevas; las aceptadas están en `docs/limitaciones-conocidas.md`.
+
+Las acciones de GitHub están fijadas a SHA. Al actualizarlas, cambia el SHA y el comentario con la versión.
+
 ## Problemas comunes
 - **`model: unavailable` en `/health`:** el bucket o el prefijo están mal, o el modelo no se subió. Revisa los logs de Render; solo registran el tipo de error.
 - **Error de CORS en el navegador:** `FRONTEND_ORIGIN` no coincide con el dominio exacto de Vercel.
 - **El primer request tarda ~1 min:** el plan gratuito duerme. Despiértalo antes de la demo.
+- **El despliegue falla en el health check con `"migration": "behind"`:** no migraste antes. Corre `alembic … upgrade head` y vuelve a desplegar.
+- **`/docs` da 404 en Render:** es intencional. La documentación interactiva solo existe con `BREASTGUARD_ENV=development`.

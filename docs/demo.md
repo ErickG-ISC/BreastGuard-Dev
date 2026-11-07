@@ -8,7 +8,7 @@ CLAUDE.md. Todo con **datos sintéticos**: ninguna imagen ni dato de pacientes r
 ### El día anterior
 
 - [ ] **Migraciones aplicadas** en la base de desarrollo:
-  `alembic -c backend/alembic.ini current` debe decir `0018 (head)`. Si no, `upgrade head`.
+  `alembic -c backend/alembic.ini current` debe decir `0019 (head)`. Si no, `upgrade head`. Después del despliegue, `/api/v1/health` debe decir `"migration": "ok"`.
 - [ ] **CI en verde** en `main`, incluido el workflow E2E.
 - [ ] **Guarda de los scripts de demo:** todos exigen `BREASTGUARD_ENV=development` y
   `DEMO_DB_REF=<ref>`, el identificador de la base de desarrollo. Con el pooler de Supabase es el
@@ -42,7 +42,10 @@ CLAUDE.md. Todo con **datos sintéticos**: ninguna imagen ni dato de pacientes r
 
 ### Una hora antes
 
-- [ ] **Despertar Render:** abre `https://<tu-api>/api/v1/health` y espera `{"status": "ok"}`.
+- [ ] **Despertar Render:** abre `https://<tu-api>/api/v1/health` y espera `"status": "ok"`, `"migration": "ok"` y `"model": "loaded"`.
+- [ ] **Smoke test** (solo lectura, sin login):
+  `python -m backend.scripts.smoke_deployed --api https://<tu-api>.onrender.com --web https://<tu-app>.vercel.app`
+  debe terminar sin fallas.
   El plan gratuito tarda ~1 minuto en despertar. Repite 5 minutos antes de empezar.
 - [ ] **Frontend de Vercel** abierto y con sesión cerrada.
 - [ ] **Tres ventanas o perfiles del navegador** (sesiones separadas), cada una con su sesión:
