@@ -123,6 +123,13 @@ class TestValidacion:
             {"intended_use": ""},
             {"training": {"dataset": ["lista"]}},
             {"recommended_thresholds": {"confidence_min": "0.6"}},
+            {"model_version": "../otro"},
+            {"model_version": "a/b"},
+            {"model_version": ""},
+            {"model_version": 3},
+            {"training": {"Ruta del bucket": "x"}},
+            {"training": {f"k{i}": i for i in range(31)}},
+            {"metrics": {"auc mal": 0.9}},
         ],
     )
     def test_campos_informativos_invalidos_no_cargan(self, extra):

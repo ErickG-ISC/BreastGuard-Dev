@@ -83,3 +83,9 @@ Todos los campos nuevos son **opcionales**, pero si vienen se validan. Un valor 
 - Un modelo nuevo no requiere tocar código, salvo que la cabeza no sea GAP → Dense (ADR 0006) o que cambie el preprocesamiento.
 - La ficha es contenido público: no debe llevar datos de pacientes ni rutas internas, y la lista blanca lo garantiza para lo que se publica.
 - Los análisis hechos con el modelo de demostración conservan su versión y su aviso de demo para siempre.
+- `model_version` es también el prefijo del bucket: solo letras, números, `.`, `-` y `_`
+  (mismo formato que `MODEL_PREFIX`). Las claves de `training` y `metrics` son `snake_case`, 30
+  como máximo; los valores de texto, hasta 2000 caracteres. Lo que se ponga ahí se publica.
+- En producción conviene fijar `MODEL_CARD_SHA256` con la huella de la ficha validada.
+- `upload_model` no sobrescribe una versión existente. Si una subida se corta, esa versión queda
+  incompleta (el servidor la rechaza por sha256) y hay que subir con otra `model_version`.

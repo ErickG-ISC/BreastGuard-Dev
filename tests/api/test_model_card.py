@@ -58,3 +58,31 @@ def test_analisis_viejo_conserva_su_version_y_su_reporte(client, user_factory, b
     fresh = upload(client, ana).json()
     assert fresh["model_version"] == "fake-3c-2"
     assert client.get(URL).json()["calibrated"] is True
+
+
+def _serve(card_data: dict):
+    card = ModelCard.from_dict(card_data)
+    app.dependency_overrides[get_inference] = lambda: InferenceService(
+        FakePredictor(card), MLSettings()
+    )
+
+
+def test_ficha_rica_publica_solo_la_lista_blanca(client):
+    _serve(
+        {
+            **DEMO_CARD,
+            "is_demo": False,
+            "preprocessing_version": 1,
+            "files": {"model.tflite": "a" * 64, "head.npz": "b" * 64},
+            "training": {"dataset": "BUSI", "images": 780},
+            "metrics": {"auc": 0.9, "confusion_matrix": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]},
+            "limitations": ["No validado para mastografía"],
+            "recommended_thresholds": {"confidence_min": 0.5},
+            "calibration": {"method": "temperature", "temperature": 1.3},
+        }
+    )
+    body = client.get(URL).json()
+    assert body["metrics"]["auc"] == 0.9 and body["training"]["dataset"] == "BUSI"
+    assert body["calibration"]["temperature"] == 1.3
+    assert "files" not in body and "recommended_thresholds" not in body
+    assert "a" * 64 not in str(body)

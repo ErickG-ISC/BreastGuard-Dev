@@ -8,6 +8,7 @@ con un valor inválido NO carga (el modelo queda `unavailable`, falla cerrado).
 
 import json
 import math
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -30,6 +31,11 @@ ALIASES = {
 TEMPERATURE_RANGE = (0.05, 20.0)
 TEXT_MAX = 2000
 MAX_LIMITATIONS = 30
+# model_version es también el prefijo del bucket: el mismo formato que loader._PREFIX
+MODEL_VERSION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$")
+# Claves de training/metrics: cortas y sin espacios (se publican; no son texto libre)
+KEY = re.compile(r"^[a-z][a-z0-9_]{0,40}$")
+MAX_KEYS = 30
 
 
 class ModelCardError(ValueError):
@@ -71,6 +77,11 @@ def _number(value, field: str) -> float:
     return float(value)
 
 
+def _keys(data: dict, field: str) -> None:
+    if len(data) > MAX_KEYS or any(not KEY.match(str(k)) for k in data):
+        raise ModelCardError(f"{field}: hasta {MAX_KEYS} claves en snake_case de 1 a 41 caracteres")
+
+
 def _calibration(data) -> Calibration:
     if data is None:
         return IDENTITY
@@ -96,6 +107,7 @@ def _metrics(data, classes: tuple[str, ...]) -> dict | None:
         return None
     if not isinstance(data, dict):
         raise ModelCardError("metrics debe ser un objeto")
+    _keys(data, "metrics")
     out: dict = {}
     for key, value in data.items():
         key = str(key)
@@ -118,6 +130,7 @@ def _metrics(data, classes: tuple[str, ...]) -> dict | None:
             for cls, values in value.items():
                 if not isinstance(values, dict):
                     raise ModelCardError("metrics.per_class debe tener objetos por clase")
+                _keys(values, "metrics.per_class")
                 per_class[_canonical(cls, "metrics.per_class")] = {
                     str(m): _number(v, f"metrics.per_class.{cls}.{m}") for m, v in values.items()
                 }
@@ -134,6 +147,7 @@ def _training(data) -> dict | None:
         return None
     if not isinstance(data, dict):
         raise ModelCardError("training debe ser un objeto")
+    _keys(data, "training")
     out = {}
     for key, value in data.items():
         if isinstance(value, bool):
@@ -150,6 +164,7 @@ def _thresholds(data) -> dict | None:
         return None
     if not isinstance(data, dict):
         raise ModelCardError("recommended_thresholds debe ser un objeto")
+    _keys(data, "recommended_thresholds")
     return {str(k): _number(v, f"recommended_thresholds.{k}") for k, v in data.items()}
 
 
@@ -198,9 +213,12 @@ class ModelCard:
         limitations = data.get("limitations") or []
         if not isinstance(limitations, list) or len(limitations) > MAX_LIMITATIONS:
             raise ModelCardError(f"limitations debe ser una lista de hasta {MAX_LIMITATIONS}")
+        model_version = data.get("model_version")
+        if not isinstance(model_version, str) or not MODEL_VERSION.match(model_version):
+            raise ModelCardError("model_version inválida (letras, números, '.', '-', '_')")
         height, width = data["input_size"]
         return cls(
-            model_version=str(data["model_version"]),
+            model_version=model_version,
             is_demo=is_demo,
             classes=classes,
             input_size=(int(height), int(width)),
