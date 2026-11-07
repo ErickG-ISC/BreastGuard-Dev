@@ -4,29 +4,35 @@
 - importar un paquete compartido como copia en su tenant (CU-08, ADR 0010);
 - sus avisos internos (p. ej. "tienes un paquete").
 
-- panel (CU-11) y caso (CU-08): lista, contadores, caso completo, estado y notas.
+- panel (CU-11) y caso (CU-08): lista, contadores, caso completo, estado y notas;
+- estudios de la médica (CU-09): JPG, PNG o DICOM, revisión BI-RADS y alta manual de fichas.
 """
 
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 
 from backend.app.api.client_ip import client_ip
 from backend.app.api.deps import ControlDb, Storage, TenantDb, require_role
 from backend.app.api.rate_limit import rate_limit
+from backend.app.ml.deps import Inference
 from backend.app.schemas.cases import (
     CaseNoteIn,
     CaseNoteOut,
     CaseOut,
     CaseStatusIn,
+    CreatedOut,
+    NewPatientIn,
     PanelPage,
     PanelSummary,
     PatientSearch,
+    ReviewIn,
+    ReviewOut,
 )
 from backend.app.schemas.handovers import HandoverAccepted, PendingHandoverOut
 from backend.app.schemas.shares import InboxNoticeOut, ShareImport, ShareImported
-from backend.app.services import cases, handovers, notices, share_import
+from backend.app.services import cases, doctor_analyses, handovers, notices, share_import
 from backend.app.services.auth import AuthContext
 from backend.app.services.tenants import NotFoundError
 
@@ -138,3 +144,59 @@ def update_note(
 )
 def delete_note(note_id: uuid.UUID, auth: DoctorUser, db: TenantDb, request: Request):
     cases.delete_note(db, auth, note_id, client_ip(request))
+
+
+# --- Estudios de la médica (CU-09) --------------------------------------------------------
+
+STUDY_LIMIT = Depends(rate_limit("doctor_analysis", 10, 60))
+
+
+@router.post(
+    "/patients",
+    response_model=CreatedOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[WRITE_LIMIT],
+)
+def create_patient(data: NewPatientIn, auth: DoctorUser, db: TenantDb, request: Request):
+    patient = doctor_analyses.create_patient(db, auth, data, client_ip(request))
+    return CreatedOut(id=patient.id)
+
+
+@router.post(
+    "/patients/{patient_id}/analyses",
+    response_model=CreatedOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[STUDY_LIMIT],
+)
+async def add_analysis(
+    patient_id: uuid.UUID,
+    auth: DoctorUser,
+    db: TenantDb,
+    storage: Storage,
+    inference: Inference,
+    request: Request,
+    file: UploadFile = File(...),
+    confirm_no_identifiers: bool = Form(False),
+    study_type: str | None = Form(None),
+):
+    doctor_analyses.check_form(confirm_no_identifiers, study_type)
+    async with doctor_analyses.study_slot():
+        upload = await doctor_analyses.read_upload(file, study_type)
+        analysis = await doctor_analyses.add_analysis(
+            db, storage, inference, auth, patient_id, upload, client_ip(request)
+        )
+    return CreatedOut(id=analysis.id)
+
+
+@router.put("/analyses/{analysis_id}/review", response_model=ReviewOut, dependencies=[WRITE_LIMIT])
+def save_review(
+    analysis_id: uuid.UUID, data: ReviewIn, auth: DoctorUser, db: TenantDb, request: Request
+):
+    review = doctor_analyses.save_review(db, auth, analysis_id, data, client_ip(request))
+    return ReviewOut(
+        birads=review.birads,
+        recommendation=review.recommendation,
+        reviewed_by_name="Tú",
+        mine=True,
+        updated_at=review.updated_at or review.created_at,
+    )

@@ -8,6 +8,7 @@ import asyncio
 import io
 import logging
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 from fastapi import HTTPException, status
@@ -26,6 +27,9 @@ from backend.app.ml.runtime import Predictor
 from backend.app.ml.settings import MLSettings
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:  # solo para anotaciones; pydicom se importa al primer DICOM
+    from backend.app.ml.dicom import DerivedImage
 
 
 class ModelOutputError(RuntimeError):
@@ -134,6 +138,30 @@ class InferenceService:
         return self.predictor is not None
 
     async def analyze(self, data: bytes) -> AnalysisOutcome:
+        return await self._guarded(lambda: data)
+
+    async def analyze_dicom(self, data: bytes) -> tuple[AnalysisOutcome, "DerivedImage"]:
+        """Decodifica el DICOM y lo analiza bajo el MISMO semáforo: un estudio a la vez en RAM.
+
+        Un DICOM no admitido lanza HTTP 422 con el mensaje de `DicomError`.
+        """
+        from backend.app.ml.dicom import DicomError, derive_image
+
+        derived: list = []
+
+        def convert() -> bytes:
+            try:
+                derived.append(derive_image(data))
+            except DicomError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+                ) from None
+            return derived[0].png
+
+        outcome = await self._guarded(convert, convert_in_thread=True)
+        return outcome, derived[0]
+
+    async def _guarded(self, source, *, convert_in_thread: bool = False) -> AnalysisOutcome:
         if self.predictor is None:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -147,6 +175,7 @@ class InferenceService:
                 detail="Hay muchos análisis en curso. Intenta de nuevo en un momento.",
             ) from None
         try:
+            data = await run_in_threadpool(source) if convert_in_thread else source()
             image = await run_in_threadpool(prepare_image, data, self.settings)
             try:
                 return await run_in_threadpool(run_analysis, image, self.predictor, self.settings)

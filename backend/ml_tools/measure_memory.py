@@ -7,6 +7,9 @@ Pensado para correr en Linux (lee /proc/self/status), por ejemplo en Docker con 
 - litert: importa la app completa (FastAPI, SQLAlchemy, Supabase...), carga el modelo TFLite y
   hace un análisis con mapa de calor CAM en numpy. Es lo que correría en Render.
 - tf: TensorFlow + modelo Keras + Grad-CAM con GradientTape (la alternativa sin conversión).
+- dicom: importa la app completa y convierte UN archivo DICOM con `ml.dicom.derive_image` (CU-09).
+  Un archivo por proceso, para que cada pico (VmHWM) sea el suyo:
+    python -m backend.ml_tools.measure_memory --mode dicom --file /dicoms/x.dcm
 """
 
 import argparse
@@ -68,6 +71,35 @@ def measure_litert(model_dir: Path) -> dict:
     return steps
 
 
+def measure_dicom(path: Path) -> dict:
+    """Lo que AGREGA un DICOM a la app ya cargada (el modelo se mide aparte con --mode litert)."""
+    steps = {"start": rss_mb()}
+    for name, value in {
+        "DATABASE_URL": "postgresql://u@localhost/db",
+        "APP_DB_PASSWORD": "x",
+        "SECRET_KEY": "x",
+        "SUPABASE_URL": "http://localhost:1",
+        "SUPABASE_KEY": "x",
+        "MODEL_LOAD_ON_STARTUP": "0",
+    }.items():
+        os.environ.setdefault(name, value)
+    import backend.app.main  # noqa: F401
+    from backend.app.ml.dicom import derive_image
+    from backend.app.ml.service import prepare_image
+
+    steps["app_imported"] = rss_mb()
+    data = path.read_bytes()
+    steps["file_mb"] = round(len(data) / 1024 / 1024, 1)
+    started = time.perf_counter()
+    derived = derive_image(data)
+    steps["derive_seconds"] = round(time.perf_counter() - started, 2)
+    del data
+    prepare_image(derived.png)  # el mismo paso previo al modelo que en un análisis
+    steps["after_derive"] = rss_mb()
+    steps["meta"] = derived.meta
+    return steps
+
+
 def measure_tf(model_dir: Path) -> dict:
     steps = {"start": rss_mb()}
     import tensorflow as tf
@@ -93,10 +125,16 @@ def measure_tf(model_dir: Path) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--mode", choices=["litert", "tf"], required=True)
-    parser.add_argument("--model-dir", type=Path, required=True)
+    parser.add_argument("--mode", choices=["litert", "tf", "dicom"], required=True)
+    parser.add_argument("--model-dir", type=Path)
+    parser.add_argument("--file", type=Path, help="Archivo DICOM (modo dicom)")
     args = parser.parse_args()
-    result = measure_litert(args.model_dir) if args.mode == "litert" else measure_tf(args.model_dir)
+    if args.mode == "dicom":
+        result = measure_dicom(args.file)
+    elif args.mode == "litert":
+        result = measure_litert(args.model_dir)
+    else:
+        result = measure_tf(args.model_dir)
     print(json.dumps({"mode": args.mode, **result}, indent=2))
 
 

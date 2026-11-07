@@ -20,3 +20,9 @@ numpy==2.5.4
 pillow==13.0.0
 # Base de zonas horarias IANA para zoneinfo (Windows y python:slim no la traen; CU-05)
 tzdata==2026.5
+# DICOM (CU-09, ADR 0011): lectura y decodificación RLE y JPEG 2000. Todos MIT; JPEG Lossless
+# no se admite porque su decodificador libre (pylibjpeg-libjpeg) es GPL
+pydicom==3.0.2
+pylibjpeg==2.1.0
+pylibjpeg-openjpeg==2.6.0
+pylibjpeg-rle==2.2.0

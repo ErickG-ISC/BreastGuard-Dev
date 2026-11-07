@@ -14,6 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from backend.app.ml.profiles import ULTRASOUND, Profile
 from backend.app.ml.quality import ImageQualityError
 from backend.app.ml.service import InferenceService
 from backend.app.models.clinical import Analysis, MedicalImage, Patient
@@ -77,6 +78,33 @@ async def create(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
         ) from None
 
+    return store_outcome(
+        db,
+        storage,
+        auth,
+        patient_id,
+        outcome,
+        profile=ULTRASOUND,
+        dicom_meta=None,
+        audit=lambda analysis_id: _audit(db, auth, "analysis.create", analysis_id, ip),
+    )
+
+
+def store_outcome(
+    db: Session,
+    storage: SupabaseStorage,
+    auth: AuthContext,
+    patient_id: uuid.UUID,
+    outcome,
+    *,
+    profile: Profile,
+    dicom_meta: dict | None,
+    audit,
+) -> Analysis:
+    """Sube imagen y mapa de calor bajo `{slug}/` y guarda imagen + análisis + auditoría.
+
+    Lo usan la paciente (CU-02) y la médica (CU-09). Si algo falla, borra lo que subió.
+    """
     image_id, analysis_id = uuid.uuid4(), uuid.uuid4()
     # Prefijo del tenant resuelto en el servidor; nombres aleatorios (nunca del cliente)
     image_path = f"{auth.tenant_slug}/images/{image_id.hex}.png"
@@ -101,7 +129,7 @@ async def create(
                 patient_id=patient_id,
                 uploaded_by=auth.user_id,
                 object_path=image_path,
-                image_type="BUSI",
+                image_type=profile.image_type,
                 prediction=outcome.predicted_class,
                 confidence=outcome.confidence,
             )
@@ -119,11 +147,17 @@ async def create(
             model_version=outcome.model_version,
             heatmap_path=heatmap_path,
             quality_flags=outcome.flags,
-            report=outcome.report,
+            report=(
+                {**outcome.report, "prototype_warning": profile.warning}
+                if profile.warning
+                else outcome.report
+            ),
+            profile=profile.code,
+            dicom_meta=dicom_meta,
         )
         db.add(analysis)
         db.flush()
-        _audit(db, auth, "analysis.create", analysis_id, ip)
+        audit(analysis_id)
         db.commit()
     except Exception:
         db.rollback()

@@ -20,9 +20,11 @@ from sqlalchemy import and_, case, delete, func, literal, or_, select, update
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
+from backend.app.ml.profiles import warning_for
 from backend.app.ml.settings import get_settings
 from backend.app.models.clinical import (
     Analysis,
+    AnalysisReview,
     CaseNote,
     MedicalImage,
     Patient,
@@ -44,6 +46,7 @@ from backend.app.schemas.cases import (
     PanelRow,
     PanelSummary,
     PatientSearch,
+    ReviewOut,
 )
 from backend.app.services import audit
 from backend.app.services.auth import AuthContext
@@ -261,6 +264,18 @@ def _names(db: Session, ids: set) -> dict[uuid.UUID, str]:
     return dict(db.execute(select(User.id, User.full_name).where(User.id.in_(ids))).all())
 
 
+def _review_out(review, names: dict, auth: AuthContext) -> ReviewOut | None:
+    if review is None:
+        return None
+    return ReviewOut(
+        birads=review.birads,
+        recommendation=review.recommendation,
+        reviewed_by_name=names.get(review.reviewed_by, "Médica"),
+        mine=review.reviewed_by == auth.user_id,
+        updated_at=review.updated_at or review.created_at,
+    )
+
+
 def _note_out(note: CaseNote, names: dict, auth: AuthContext) -> CaseNoteOut:
     return CaseNoteOut(
         id=note.id,
@@ -288,6 +303,11 @@ def get_case(
         .where(Analysis.patient_id == patient.id)
         .order_by(Analysis.created_at.desc(), Analysis.id)
     ).all()
+    reviews = {
+        r.analysis_id: r
+        for r in db.scalars(select(AnalysisReview).where(AnalysisReview.patient_id == patient.id))
+    }
+    reviewers = _names(db, {r.reviewed_by for r in reviews.values()})
     analyses = []
     for analysis, image in rows:
         # Pertenencia: fila visible por RLS Y rutas bajo el prefijo del tenant del JWT
@@ -316,6 +336,9 @@ def get_case(
                 suspicious=is_suspicious(analysis.predicted_class, analysis.quality_flags),
                 image_url=image_url,
                 heatmap_url=heatmap_url,
+                dicom_meta=analysis.dicom_meta,
+                prototype_warning=warning_for(analysis.profile),
+                review=_review_out(reviews.get(analysis.id), reviewers, auth),
             )
         )
 

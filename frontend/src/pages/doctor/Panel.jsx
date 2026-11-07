@@ -7,6 +7,10 @@ import {
   CardContent,
   Chip,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Grid,
   InputAdornment,
   Stack,
@@ -133,6 +137,59 @@ function Inbox() {
   );
 }
 
+// Alta manual de una ficha de la institución (origen "creado", ella como responsable)
+function NewPatientDialog({ open, onClose, onCreated }) {
+  const [name, setName] = useState('');
+  const [age, setAge] = useState('');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  async function submit(event) {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+    try {
+      const { data } = await api.post('/doctor/patients', {
+        display_name: name.trim(),
+        age_years: age === '' ? null : Number(age),
+      });
+      onCreated(data.id);
+    } catch (err) {
+      setError(errorMessage(err, 'No se pudo dar de alta.'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="xs">
+      <form onSubmit={submit}>
+        <DialogTitle>Nueva paciente</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            {error && <Alert severity="error">{error}</Alert>}
+            <TextField label="Nombre" value={name} onChange={(e) => setName(e.target.value)} required />
+            <TextField
+              label="Edad (años)"
+              type="number"
+              value={age}
+              onChange={(e) => setAge(e.target.value)}
+              slotProps={{ htmlInput: { min: 0, max: 120 } }}
+              helperText="Se guarda la edad de hoy, no la fecha de nacimiento."
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={onClose}>Cancelar</Button>
+          <Button type="submit" variant="contained" disabled={!name.trim() || saving}>
+            Dar de alta
+          </Button>
+        </DialogActions>
+      </form>
+    </Dialog>
+  );
+}
+
 // CU-11: panel de pacientes (D01). La búsqueda va por POST: el nombre nunca en la URL.
 export default function Panel() {
   const desktop = useMediaQuery((theme) => theme.breakpoints.up('md'));
@@ -145,6 +202,7 @@ export default function Panel() {
   const [offset, setOffset] = useState(0);
   const [page, setPage] = useState(null);
   const [error, setError] = useState('');
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebounced(query.trim()), 300);
@@ -184,10 +242,20 @@ export default function Panel() {
         <Typography variant="h5" component="h1">
           Panel
         </Typography>
-        <Button variant="outlined" component={RouterLink} to="/medico/importar">
-          Importar paquete
-        </Button>
+        <Stack direction="row" spacing={1}>
+          <Button variant="contained" onClick={() => setCreating(true)}>
+            Nueva paciente
+          </Button>
+          <Button variant="outlined" component={RouterLink} to="/medico/importar">
+            Importar paquete
+          </Button>
+        </Stack>
       </Stack>
+      <NewPatientDialog
+        open={creating}
+        onClose={() => setCreating(false)}
+        onCreated={(id) => navigate(`/medico/pacientes/${id}`)}
+      />
       <Inbox />
       <Grid container spacing={2}>
         <Grid size={{ xs: 12, sm: 4 }}>

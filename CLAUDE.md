@@ -105,7 +105,7 @@ Reglas de infraestructura:
   - Los textos y reglas están en `backend/app/content/`: el consentimiento en markdown, el cuestionario v1 y `risk_rules.py`, que da factores a comentar y nunca una probabilidad. `/auth/token` responde 401 genérico, o 403 si la cuenta o el tenant están inactivos. El JWT lleva `sub`, `tenant_id`, `role` y `exp`.
 - `/health` solo hace `SELECT 1` con `get_control_db` (503 genérico si falla). El esquema lo crea **Alembic** (`backend/migrations/`, helpers RLS en `backend/migrations/rls.py`); nunca `create_all`.
 - `services/auth.py`: hash bcrypt, JWT, `register_patient`, `authenticate_user` y `load_auth_context`.
-- `services/images.py`: valida la subida (extensión y MIME JPG/PNG, tamaño `MAX_UPLOAD_MB`, que abra con Pillow) y sube a `{tenant_slug}/images/{uuid}.{ext}` con un temporal uuid que se borra en `finally`. La fila guarda `object_path`, no una URL. DICOM se rechaza hasta CU-09.
+- `services/images.py`: valida la subida (extensión y MIME JPG/PNG, tamaño `MAX_UPLOAD_MB`, que abra con Pillow) y sube a `{tenant_slug}/images/{uuid}.{ext}` con un temporal uuid que se borra en `finally`. La fila guarda `object_path`, no una URL. DICOM no entra por aquí: es de la médica (`/doctor/patients/{id}/analyses`, ADR 0011).
 - `services/storage.py`: bucket **privado** de Supabase Storage (cliente creado al primer uso): `upload_file`, `create_signed_url` (TTL `SIGNED_URL_TTL_SECONDS`, 300 s por defecto) y `remove_prefix` (purga). Nunca URLs públicas. Los fallos se registran solo por tipo (`StorageError`, 502). No se usa AWS/S3.
 - `services/audit.py`: `record(...)` inserta en `clinical.audit_log` con Core y sin RETURNING, en la misma transacción que la acción. `list_entries(...)` sirve a `GET /audit`.
 - Administración (ADR 0008; resumen en `docs/arquitectura-multitenencia.md`):
@@ -167,6 +167,10 @@ Reglas de infraestructura:
   - 0017: trigger `enforce_case_status` (transiciones), `reviewed_by` y `reviewed_at` puestos por el trigger, un análisis nuevo devuelve el caso a pendiente, y notas que edita o borra solo su autora y que la paciente nunca ve.
   - Frontend: `/medico` (Panel) y `/medico/pacientes/:id` (Case). La campana de la paciente incluye avisos `share_update` de sus paquetes.
   - `backend/scripts/demo_flow.py`: escenario de demo por el flujo real (solo cuentas `demo-paciente-…@demo.invalid`, un dominio que el registro público rechaza, y tenants `demo-…`).
+- Estudios de la médica y DICOM (CU-09, ADR 0011; `ml/dicom.py`, `ml/profiles.py`, `services/doctor_analyses.py`):
+  - `POST /doctor/patients/{id}/analyses` (DICOM, JPG o PNG, 10/min), `PUT /doctor/analyses/{id}/review` (BI-RADS y recomendación DE LA MÉDICA) y `POST /doctor/patients` (alta manual `creado`). Solo fichas de las que es responsable; con un traspaso pendiente, 409.
+  - DICOM: máximo 60 MB y 4096 px (medido en Docker con 512 MB), firma `DICM`, un cuadro y gris; sintaxis sin compresión, RLE, JPEG Baseline o JPEG 2000 (JPEG Lossless es GPL: no se admite); `BurnedInAnnotation` se rechaza. Reducción en 16 bits antes de la ventana y MONOCHROME1 invertida, dentro del semáforo (`InferenceService.analyze_dicom`).
+  - Nunca se guarda el DICOM: solo la imagen derivada en PNG y `analyses.dicom_meta` con lista blanca técnica. Perfil `mastografia_prototipo` con aviso permanente; el modelo nunca sugiere BI-RADS. 0018: quien edita la revisión queda como autora.
 - `api/v1/images.py`: `POST /upload` (paciente), `GET /images` y `GET /images/{id}` (con URL firmada; ajena o inexistente da el mismo 404). Lecturas, subidas y accesos denegados (`image.denied`) auditados.
 - `api/v1/audit.py`: `GET /audit` para `tenant_admin` con filtros `from`, `to`, `actor_id`, `limit` y `offset`.
 - `api/rate_limit.py`: límites por IP y ruta: `/auth/token` 10/min, `/auth/register` 5/min, `/images/upload` 20/min. La IP sale de `api/client_ip.py`: ignora `X-Forwarded-For` salvo con `TRUSTED_PROXY_HOPS` (en Render, `1`; ver ADR 0004).
@@ -247,7 +251,7 @@ Estado: **modelo de demostración** (EfficientNet-B0 sin entrenar, 3 clases, `is
   - `settings.py`: **todos** los umbrales;
   - `service.py`: threadpool, semáforo `MAX_CONCURRENT_INFERENCES` y descarte del EXIF.
 - **Salida:** clase (`normal|benigno|maligno`), probabilidades, confianza, `model_version`, heatmap superpuesto y reporte sencillo. El reporte técnico BI-RADS (B2B) llega con el panel médico.
-- **DICOM (B2B):** leer con `pydicom`, convertir a imagen normalizada y pasarla por el modelo. BUSI son ecografías: un modelo entrenado en ellas **no es válido para mastografías**. Mostrar siempre que es un prototipo; un modelo real de mastografía requeriría otro dataset (CBIS-DDSM, INbreast, VinDr-Mammo).
+- **DICOM (B2B, ADR 0011):** `ml/dicom.py` valida y convierte con `pydicom` (sin guardar el original) y la imagen derivada pasa por el mismo modelo con el perfil `mastografia_prototipo`. BUSI son ecografías: un modelo entrenado en ellas **no es válido para mastografías**. Mostrar siempre que es un prototipo; un modelo real de mastografía requeriría otro dataset (CBIS-DDSM, INbreast, VinDr-Mammo).
 - Reportar métricas honestas (matriz de confusión, sensibilidad en maligno). Dividir train/test sin fuga de datos entre imágenes del mismo paciente o serie.
 
 ## Seguridad, privacidad y avisos

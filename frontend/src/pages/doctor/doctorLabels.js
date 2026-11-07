@@ -71,3 +71,24 @@ export const SYMPTOM = {
   otro: 'Otro',
 };
 export const NOTICED = { si: 'Notó un cambio', no: 'Sin cambios', no_segura: 'No está segura' };
+
+// Mismo texto que backend/app/ml/profiles.py (se muestra también antes de subir un DICOM)
+export const PROTOTYPE_WARNING =
+  'Prototipo: el modelo se entrenó con ecografías y no está validado para mastografías.';
+
+export const VIEW = { CC: 'craneocaudal (CC)', MLO: 'mediolateral oblicua (MLO)' };
+export const LATERALITY = { L: 'izquierda', R: 'derecha' };
+
+// Categorías BI-RADS que asigna la médica (el modelo nunca las sugiere)
+export const BIRADS = [
+  { value: '0', label: '0 · Evaluación incompleta' },
+  { value: '1', label: '1 · Negativo' },
+  { value: '2', label: '2 · Hallazgo benigno' },
+  { value: '3', label: '3 · Probablemente benigno' },
+  { value: '4', label: '4 · Sospechoso' },
+  { value: '4A', label: '4A · Baja sospecha' },
+  { value: '4B', label: '4B · Sospecha moderada' },
+  { value: '4C', label: '4C · Alta sospecha' },
+  { value: '5', label: '5 · Altamente sugestivo de malignidad' },
+  { value: '6', label: '6 · Malignidad comprobada por biopsia' },
+];

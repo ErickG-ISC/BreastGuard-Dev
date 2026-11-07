@@ -160,6 +160,13 @@ paciente genera una copia cifrada y la médica la importa en su propio tenant:
   - un análisis nuevo lo devuelve a pendiente;
   - las notas solo las edita su autora y la paciente no puede leerlas.
 
+## 6 quater. Estudios DICOM de la médica (ADR 0011)
+
+- **Contexto:** se suben con el `TenantDb` de la doctora, solo a fichas de las que es
+  responsable; las rutas de Storage salen del JWT (`{slug}/images|heatmaps/`).
+- **Desidentificación:** el DICOM original nunca se guarda; en la base solo queda una lista
+  blanca técnica. Ningún dato personal del estudio llega a `clinical` ni a Storage.
+
 ## 7 bis. Traspaso de pacientes entre médicas (ADR 0009, migración 0014)
 
 Las fichas de institución solo las ve su médica responsable. Si ella se va, la administración no
