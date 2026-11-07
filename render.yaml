@@ -35,6 +35,9 @@ services:
         value: demo-effb0-untrained-1
       - key: MAX_CONCURRENT_INFERENCES
         value: "1"
+      # Estudios de la médica en vuelo (ADR 0013): 2 cabe en 512 MB; con presión de memoria, 1
+      - key: MAX_STUDIES_IN_FLIGHT
+        value: "2"
       # Render agrega la IP del cliente al final de X-Forwarded-For (ADR 0004)
       - key: TRUSTED_PROXY_HOPS
         value: "1"

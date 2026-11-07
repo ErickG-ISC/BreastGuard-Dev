@@ -5,7 +5,7 @@ huellas de archivos, rutas del bucket ni umbrales internos. Si un dato no está 
 aparece: la página no inventa métricas.
 """
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter
 
 from backend.app.ml.deps import Inference
 from backend.app.ml.profiles import PROTOTYPE_WARNING
@@ -16,8 +16,7 @@ router = APIRouter()
 
 
 @router.get("/model/card", response_model=ModelCardOut, response_model_exclude_none=True)
-def get_model_card(inference: Inference, response: Response) -> ModelCardOut:
-    response.headers["Cache-Control"] = "public, max-age=300"
+def get_model_card(inference: Inference) -> ModelCardOut:
     common = {"disclaimer": DISCLAIMER, "mammography_warning": PROTOTYPE_WARNING}
     if not inference.available:
         return ModelCardOut(status="unavailable", **common)

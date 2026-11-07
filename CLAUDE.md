@@ -23,8 +23,9 @@ Prioridad de implementación acordada: **1) multitenencia (CU-12, CU-13), 2) B2C
 - `tests/` — pytest contra **Postgres real** (`pgtest.py`: base temporal y variables de prueba; `conftest.py`: fixtures; `helpers.py`: fábricas; `isolation/`: pruebas de RLS y catálogo)
 - `docker-compose.yml` — Postgres 17 local para pruebas (puerto 54329)
 - `infraestructure/` — reservado para despliegue/IaC; todavía no existe en el repo (git no guarda carpetas vacías). El nombre lleva ese typo a propósito; no renombrar sin avisar
-- `docs/` — casos de uso (`casos-de-uso.md`), decisiones de arquitectura (`adr/`) y guion de demo (`demo.md`, con lista previa y plan B)
+- `docs/` — casos de uso (`casos-de-uso.md`), decisiones de arquitectura (`adr/`, índice en `adr/README.md`), guion de demo (`demo.md`, con lista previa y plan B), `despliegue.md`, `migracion-hosting.md`, `hl7-integracion.md` y `limitaciones-conocidas.md`
 - `e2e/` — flujos con Playwright contra un entorno local o de CI (nunca Render): `pytest e2e -q` (`requirements-e2e.txt`); workflow aparte `.github/workflows/e2e.yml`, que no bloquea la fusión
+- `.github/workflows/audit.yml` — pip-audit y npm audit (no bloquea; también cada lunes)
 - `.github/workflows/ci.yml` — CI en cada push y PR: job `backend` (ruff y pytest contra un servicio Postgres 17, Python 3.12, sin TensorFlow) y job `frontend` (`npm ci`, oxlint, build y `npm run check:sw`)
 
 El repo se inicializó con git localmente en la Fase 0 (venía de un ZIP); el remoto se conecta a mano.
@@ -71,7 +72,7 @@ npm run preview
 
 Todos los secretos vienen de variables de entorno. Ver `.env.example` (raíz) y `frontend/.env.example`. `main.py` llama `load_dotenv()` antes de importar el resto.
 
-Variables existentes: `RESEND_API_KEY`, `EMAIL_FROM` (invitaciones y recordatorios con `EMAIL_BACKEND=resend`), `REMINDER_CRON_SECRET`, `EMAIL_BACKEND`, `EMAIL_FROM_NAME`, `PUBLIC_APP_URL` (CU-05), `DATABASE_URL`, `SECRET_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`, `SUPABASE_BUCKET`, `FRONTEND_ORIGIN`, `MODEL_BUCKET`, `MODEL_PREFIX`, `MODEL_DIR`, `MAX_CONCURRENT_INFERENCES`, `MAX_UPLOAD_MB` (opcional, 10 por defecto), y `VITE_API_URL` en el frontend.
+Variables existentes: `RESEND_API_KEY`, `EMAIL_FROM` (invitaciones y recordatorios con `EMAIL_BACKEND=resend`), `REMINDER_CRON_SECRET`, `EMAIL_BACKEND`, `EMAIL_FROM_NAME`, `PUBLIC_APP_URL` (CU-05), `DATABASE_URL`, `SECRET_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`, `SUPABASE_BUCKET`, `FRONTEND_ORIGIN`, `MODEL_BUCKET`, `MODEL_PREFIX`, `MODEL_DIR`, `MAX_CONCURRENT_INFERENCES`, `MAX_UPLOAD_MB` (opcional, 10 por defecto), `MAX_STUDIES_IN_FLIGHT` (1 o 2, 2 por defecto; ADR 0013), `MODEL_CARD_SHA256` (opcional, fija la huella de la ficha), `BREASTGUARD_ENV` (`development` habilita `/docs` y los scripts de demo), `RENDER_GIT_COMMIT` (lo pone Render; versión en `/health`), y `VITE_API_URL` en el frontend.
 
 Variables de la multitenencia (ADR 0003):
 - `DATABASE_URL` — rol **dueño/migrador**; solo lo usan Alembic y los scripts de mantenimiento. La app toma de aquí solo host, puerto, base y sufijo del usuario (`postgres.<ref>` → `app_user.<ref>`), así que en Render puede ir sin la contraseña del dueño.
@@ -104,7 +105,7 @@ Reglas de infraestructura:
   - públicos: `GET /consent/current` y `GET /plans`;
   - solo pacientes: `GET/PUT /subscription/me`, `GET /questionnaire/current`, `POST /questionnaires` y `GET /questionnaires/latest`.
   - Los textos y reglas están en `backend/app/content/`: el consentimiento en markdown, el cuestionario v1 y `risk_rules.py`, que da factores a comentar y nunca una probabilidad. `/auth/token` responde 401 genérico, o 403 si la cuenta o el tenant están inactivos. El JWT lleva `sub`, `tenant_id`, `role` y `exp`.
-- `/health` solo hace `SELECT 1` con `get_control_db` (503 genérico si falla). El esquema lo crea **Alembic** (`backend/migrations/`, helpers RLS en `backend/migrations/rls.py`); nunca `create_all`.
+- `/health` (ADR 0016): `SELECT 1` con `get_control_db` (503 genérico si falla), `version` (commit de Render), `migration` (`ok|ahead|behind|unknown`; `behind` o sin permiso de lectura ⇒ **503**; otro error de lectura ⇒ `unknown` con 200; 120/min por IP; revisiones solo en el log, así un despliegue sin migrar no pasa el health check de Render; 0019 da a `app_user` SELECT sobre `public.alembic_version`), `model` y `model_version`. Sin datos de conexión. El esquema lo crea **Alembic** (`backend/migrations/`, helpers RLS en `backend/migrations/rls.py`); nunca `create_all`.
 - `services/auth.py`: hash bcrypt, JWT, `register_patient`, `authenticate_user` y `load_auth_context`.
 - `services/images.py`: valida la subida (extensión y MIME JPG/PNG, tamaño `MAX_UPLOAD_MB`, que abra con Pillow) y sube a `{tenant_slug}/images/{uuid}.{ext}` con un temporal uuid que se borra en `finally`. La fila guarda `object_path`, no una URL. DICOM no entra por aquí: es de la médica (`/doctor/patients/{id}/analyses`, ADR 0011).
 - `services/storage.py`: bucket **privado** de Supabase Storage (cliente creado al primer uso): `upload_file`, `create_signed_url` (TTL `SIGNED_URL_TTL_SECONDS`, 300 s por defecto) y `remove_prefix` (purga). Nunca URLs públicas. Los fallos se registran solo por tipo (`StorageError`, 502). No se usa AWS/S3.
@@ -178,6 +179,14 @@ Reglas de infraestructura:
   - Auditoría `case.export_pdf|export_hl7` y `analysis.export_pdf`; el id del registro de auditoría ES el `report_id` del documento (`audit.record(entry_id=)`). Nombre de archivo `breastguard-reporte-<8>.pdf|hl7`, `Cache-Control: no-store`; CORS expone `Content-Disposition`. El frontend descarga con axios y blob (`api/download.js`), nunca con el token en la URL.
 - `api/v1/images.py`: `POST /upload` (paciente), `GET /images` y `GET /images/{id}` (con URL firmada; ajena o inexistente da el mismo 404). Lecturas, subidas y accesos denegados (`image.denied`) auditados.
 - `api/v1/audit.py`: `GET /audit` para `tenant_admin` con filtros `from`, `to`, `actor_id`, `limit` y `offset`.
+- Endurecimiento (ADR 0016):
+  - cabeceras de seguridad en `/api/*` (`main.py`: nosniff, no-referrer, DENY, CSP `default-src 'none'`, HSTS, no-store);
+  - `/docs`, `/redoc` y `/openapi.json` solo con `BREASTGUARD_ENV=development`;
+  - CSP y cabeceras del frontend en `frontend/vercel.json` (comodines `*.onrender.com`/`*.supabase.co`);
+  - `backend/scripts/smoke_deployed.py` (solo lectura, sin login) tras cada despliegue;
+  - `tests/api/test_logs_sin_datos.py` vigila que ningún log lleve datos sensibles;
+  - `audit.yml` (pip-audit y npm audit, no bloquea); acciones fijadas a SHA;
+  - riesgos aceptados en `docs/limitaciones-conocidas.md`.
 - `api/rate_limit.py`: límites por IP y ruta: `/auth/token` 10/min, `/auth/register` 5/min, `/images/upload` 20/min. La IP sale de `api/client_ip.py`: ignora `X-Forwarded-For` salvo con `TRUSTED_PROXY_HOPS` (en Render, `1`; ver ADR 0004).
 - `backend/scripts/`:
   - `create_platform_admin.py`: como `app_user`, pide la contraseña;

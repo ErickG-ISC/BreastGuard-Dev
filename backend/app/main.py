@@ -59,7 +59,15 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(lifespan=lifespan)
+# La documentación interactiva (/docs, /redoc, /openapi.json) solo en desarrollo: en producción
+# no se publica el mapa completo de la API (ADR 0016)
+_dev = os.environ.get("BREASTGUARD_ENV") == "development"
+app = FastAPI(
+    lifespan=lifespan,
+    docs_url="/docs" if _dev else None,
+    redoc_url="/redoc" if _dev else None,
+    openapi_url="/openapi.json" if _dev else None,
+)
 
 # Tolerante a errores de captura (sin https://, comillas, espacios, barra final)
 frontend_origins = parse_origins(os.environ.get("FRONTEND_ORIGIN"))
@@ -78,12 +86,24 @@ app.add_middleware(
 )
 
 
+# La API solo devuelve JSON o archivos descargables: nada se ejecuta ni se incrusta (ADR 0016)
+SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "X-Frame-Options": "DENY",
+    "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
+    "Strict-Transport-Security": "max-age=31536000",
+}
+
+
 @app.middleware("http")
 async def no_store_api(request: Request, call_next):
     """Las respuestas de la API (datos clínicos, URLs firmadas) no se guardan en cachés HTTP."""
     response = await call_next(request)
     if request.url.path.startswith("/api/"):
         response.headers["Cache-Control"] = "no-store"
+        for name, value in SECURITY_HEADERS.items():
+            response.headers.setdefault(name, value)
     return response
 
 

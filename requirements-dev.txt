@@ -3,4 +3,6 @@ pytest==9.1.1
 httpx2==2.15.1
 ruff==0.17.1
 # Lectura del texto de los PDF de CU-10 en las pruebas (BSD, Python puro)
-pypdf==6.21.1
+pypdf==6.21.4
+# Auditoría de dependencias (ADR 0016); también corre en .github/workflows/audit.yml
+pip-audit==2.10.1

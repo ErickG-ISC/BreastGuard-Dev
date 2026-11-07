@@ -167,6 +167,17 @@ paciente genera una copia cifrada y la médica la importa en su propio tenant:
 - **Desidentificación:** el DICOM original nunca se guarda; en la base solo queda una lista
   blanca técnica. Ningún dato personal del estudio llega a `clinical` ni a Storage.
 
+## 6 quinquies. Reportes PDF y HL7 (CU-10, ADR 0015)
+
+- La médica exporta solo análisis de fichas de las que es **responsable**:
+  - mismo `TenantDb` y filtro `_visible` que el caso;
+  - con un traspaso pendiente, la de destino ve el caso pero recibe 409;
+  - sin una revisión con BI-RADS, 409.
+- La paciente exporta solo su propio análisis (`analyses._own`).
+- El mapa de calor se descarga solo si su ruta tiene el prefijo `{tenant_slug}/`, y la conexión se suelta antes de ir a Storage.
+- Cada exportación queda en `clinical.audit_log` del tenant (`case.export_pdf`, `case.export_hl7`, `analysis.export_pdf`; los rechazos como `case.denied` o `case.export_denied`), sin contenido. El id de ese registro **es** el `report_id` del documento.
+- El nombre del archivo no lleva datos personales y la respuesta es `no-store`.
+
 ## 7 bis. Traspaso de pacientes entre médicas (ADR 0009, migración 0014)
 
 Las fichas de institución solo las ve su médica responsable. Si ella se va, la administración no
@@ -230,8 +241,9 @@ una base temporal, aplica las migraciones y usa el rol `bg_app_test` (NOBYPASSRL
 
 ## 9. Limitaciones conocidas
 
-- **Compartir con el médico (CU-07):** está diseñado (paquete con token de un solo uso importado
-  como copia) pero **no implementado**. Hoy no existe ningún flujo entre tenants.
+- **Compartir con la médica (CU-07/CU-08):** implementado (sección 6 bis, ADR 0010). Es el
+  único flujo entre tenants y no usa excepciones de política: el paquete cifrado se importa como
+  copia en el tenant de la médica.
 - **`control` no tiene RLS:** su aislamiento depende del filtro del servicio, cubierto por pruebas
   cruzadas. Una regresión en ese filtro no la detendría la base.
 - **Rate limit en memoria:** vale para una sola instancia.
@@ -244,3 +256,6 @@ una base temporal, aplica las migraciones y usa el rol `bg_app_test` (NOBYPASSRL
   ninguna prueba automática lo verifica.
 - **Esquema `legacy`:** conserva el prototipo original; queda pendiente borrarlo.
 - **Auditoría administrativa anterior a 0012:** quedó en `clinical.audit_log`, sin migrar.
+- **`app_user` lee `public.alembic_version`** (0019), solo para que `/health` compare la revisión
+  de la base con la del código. Los roles de la Data API siguen sin acceso.
+- Lista general (modelo, infraestructura y riesgos aceptados): `docs/limitaciones-conocidas.md`.
