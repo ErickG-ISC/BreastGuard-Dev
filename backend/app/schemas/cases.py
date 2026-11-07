@@ -62,6 +62,51 @@ class PanelSummary(BaseModel):
     active: int
 
 
+BiRads = Literal["0", "1", "2", "3", "4", "4A", "4B", "4C", "5", "6"]
+
+
+class ReviewIn(BaseModel):
+    """Categoría BI-RADS y recomendación que asigna LA MÉDICA (el modelo nunca sugiere BI-RADS)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    birads: BiRads
+    recommendation: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("recommendation")
+    @classmethod
+    def clean(cls, value: str | None) -> str | None:
+        if value is not None and "\x00" in value:
+            raise ValueError("Texto no válido")
+        return value.strip() or None if value is not None else None
+
+
+class ReviewOut(BaseModel):
+    birads: str | None
+    recommendation: str | None
+    reviewed_by_name: str
+    mine: bool
+    updated_at: datetime
+
+
+class NewPatientIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    display_name: str = Field(min_length=1, max_length=200)
+    age_years: int | None = Field(default=None, ge=0, le=120)
+
+    @field_validator("display_name")
+    @classmethod
+    def not_blank(cls, value: str) -> str:
+        if "\x00" in value or not value.strip():
+            raise ValueError("El nombre no puede estar vacío")
+        return value
+
+
+class CreatedOut(BaseModel):
+    id: uuid.UUID
+
+
 class CaseAnalysisOut(BaseModel):
     id: uuid.UUID
     created_at: datetime
@@ -76,6 +121,10 @@ class CaseAnalysisOut(BaseModel):
     suspicious: bool
     image_url: str
     heatmap_url: str
+    # Lista blanca técnica del DICOM (vista, lateralidad, espaciado...); nunca datos personales
+    dicom_meta: dict | None
+    prototype_warning: str | None
+    review: ReviewOut | None
 
 
 class CaseSelfExamOut(BaseModel):
