@@ -35,9 +35,25 @@ from backend.app.services.storage import SupabaseStorage
 DICOM_EXTENSIONS = {".dcm", ".dicom"}
 DICOM_TYPES = {"application/dicom", "application/octet-stream"}
 STUDY_TYPES = {"ecografia", "mastografia"}
+
+
 # Estudios en vuelo (lectura + espera + análisis): cada uno puede tener 60 MB en memoria.
 # El semáforo de la inferencia solo cubre el análisis; este acota también la lectura.
-MAX_STUDIES_IN_FLIGHT = 2
+# Con 2, el peor caso medido (dos JPEG 2000 de 4096×4096) es 419 MB de 512 (ADR 0013); si Render
+# muestra presión de memoria, MAX_STUDIES_IN_FLIGHT=1 lo baja a ~357 MB sin tocar el código.
+def _max_studies() -> int:
+    raw = os.environ.get("MAX_STUDIES_IN_FLIGHT", "2")
+    try:
+        value = int(raw)
+    except ValueError:
+        raise RuntimeError("MAX_STUDIES_IN_FLIGHT debe ser un entero entre 1 y 2") from None
+    if not 1 <= value <= 2:
+        # Más de 2 no cabe en 512 MB con el peor caso medido (ADR 0013)
+        raise RuntimeError("MAX_STUDIES_IN_FLIGHT debe ser un entero entre 1 y 2")
+    return value
+
+
+MAX_STUDIES_IN_FLIGHT = _max_studies()
 SLOT_WAIT_SECONDS = 20
 _studies = asyncio.Semaphore(MAX_STUDIES_IN_FLIGHT)
 

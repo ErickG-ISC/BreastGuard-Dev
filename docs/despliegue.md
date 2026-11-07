@@ -18,7 +18,7 @@ El backend va en **Render** (plan gratuito, unos 512 MB) y el frontend en **Verc
    | `FRONTEND_ORIGIN` | `https://<tu-app>.vercel.app` (con `https://`). |
 3. Despliega. El primer arranque descarga el modelo (unos 16 MB) del bucket privado.
 4. Verifica: `https://<tu-api>.onrender.com/api/v1/health` debe responder `{"status":"ok","database":"connected","model":"loaded"}`.
-5. Mide la RAM: en Render → **Metrics → Memory**, después de un análisis. En Docker con 512 MB se midió un pico de 184 MB (ADR 0006).
+5. Mide la RAM: en Render → **Metrics → Memory**, después de un análisis y de un DICOM. En Docker con 512 MB se midió (ADR 0013): 187 MB con una ecografía, 304–357 MB con una mastografía de 4096 px y 419 MB en el peor caso (2 JPEG 2000 de 4096×4096 a la vez). Si Render muestra presión de memoria, pon `MAX_STUDIES_IN_FLIGHT=1`. Si un modelo futuro no cabe, ver `docs/migracion-hosting.md`.
 
 La app **no arranca** (falla cerrado, es intencional):
 - si falta `APP_DB_PASSWORD`, porque nunca usa la contraseña del dueño;

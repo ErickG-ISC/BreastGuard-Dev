@@ -5,8 +5,10 @@ las peticiones que esperen más de queue_timeout_seconds reciben 503.
 """
 
 import asyncio
+import ctypes
 import io
 import logging
+import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -30,6 +32,34 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:  # solo para anotaciones; pydicom se importa al primer DICOM
     from backend.app.ml.dicom import DerivedImage
+
+
+def _load_malloc_trim():
+    """`malloc_trim` de glibc (solo Linux, como en Render); en otro sistema no hace nada."""
+    if not sys.platform.startswith("linux"):
+        return None
+    try:
+        trim = ctypes.CDLL("libc.so.6").malloc_trim
+    except (OSError, AttributeError):
+        # Sin glibc (p. ej. musl/Alpine): la app funciona, pero sin esta mitigación
+        logger.warning("malloc_trim no disponible; la memoria tras un DICOM no se devuelve")
+        return None
+    trim.argtypes = [ctypes.c_size_t]
+    trim.restype = ctypes.c_int
+    return trim
+
+
+_MALLOC_TRIM = _load_malloc_trim()
+
+
+def release_memory() -> None:
+    """Devuelve al sistema la memoria libre del heap nativo tras un estudio DICOM.
+
+    Los decodificadores (openjpeg, RLE) reservan bloques grandes fuera de Python; sin esto el
+    proceso conserva el pico del estudio anterior y dos estudios seguidos se suman (ADR 0013).
+    """
+    if _MALLOC_TRIM is not None:
+        _MALLOC_TRIM(0)
 
 
 class ModelOutputError(RuntimeError):
@@ -186,4 +216,10 @@ class InferenceService:
                     detail="No se pudo analizar la imagen. Intenta de nuevo más tarde.",
                 ) from None
         finally:
-            self._semaphore.release()
+            try:
+                if convert_in_thread:
+                    # Antes de soltar el turno: el siguiente estudio no hereda este pico
+                    await run_in_threadpool(release_memory)
+            finally:
+                # Aunque la liberación se cancele o falle, el turno SIEMPRE se devuelve
+                self._semaphore.release()

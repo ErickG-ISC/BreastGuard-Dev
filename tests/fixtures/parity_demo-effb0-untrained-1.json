@@ -1,0 +1,256 @@
+{
+  "model_version": "demo-effb0-untrained-1",
+  "preprocessing": "raw_0_255",
+  "input_size": [
+    224,
+    224
+  ],
+  "color_mode": "rgb",
+  "classes": [
+    "normal",
+    "benigno",
+    "maligno"
+  ],
+  "images": [
+    {
+      "name": "00-speckle-480x360",
+      "image_sha256": "f850467bb1734828ae67213bde1cca738314e15287c752ff9ef9b447761e051b",
+      "input_sha256": "6521c6bf38bba11b2a3ac9b4e43db3c5e42948a4a38889dd6723b6cb15a8395e",
+      "litert_probabilities": [
+        0.333333,
+        0.333337,
+        0.33333
+      ]
+    },
+    {
+      "name": "01-speckle-640x480",
+      "image_sha256": "6ea7105848b058496d0aba4a34d37171e9075e9793dcf756e68649f96130c781",
+      "input_sha256": "bde48bcc985ff541eba745c2a3953d3e5e5fcf0eec60dbc9a1087b159b26f80d",
+      "litert_probabilities": [
+        0.333333,
+        0.333338,
+        0.33333
+      ]
+    },
+    {
+      "name": "02-speckle-600x600",
+      "image_sha256": "6f8e8e76b647244ec840c25bac7a12d488244a08b23b4f8fb1ad62ede4fc9005",
+      "input_sha256": "62a04bfe25a5aa97222bc6d917d95bf3fd22af83b61ed431aa04d4199bfc10a6",
+      "litert_probabilities": [
+        0.333332,
+        0.333339,
+        0.333329
+      ]
+    },
+    {
+      "name": "03-speckle-420x300",
+      "image_sha256": "b8102f371331016d56760c40a4b5588911b61b19e3d595eef7c46d689194256f",
+      "input_sha256": "0c5db8c1a5def7c9f64ea666d67fc386552edcb91468d9736f2c4096c64aa5d2",
+      "litert_probabilities": [
+        0.333332,
+        0.333339,
+        0.333328
+      ]
+    },
+    {
+      "name": "04-speckle-540x720",
+      "image_sha256": "2f57bf97feaf6ef86a05803c0babd5dc0b02319ab73a023d87517775de851294",
+      "input_sha256": "5c165ac7fb6f0dba760c325299b81a2b9204fc38f8e2da4805b1e9a5b813f065",
+      "litert_probabilities": [
+        0.333332,
+        0.33334,
+        0.333328
+      ]
+    },
+    {
+      "name": "05-speckle-256x256",
+      "image_sha256": "6cf3ffbb0a8fcf5b3eb26e02e09ebdf1419464f67e648be70477f2d05d9e7ed7",
+      "input_sha256": "59f92617f9d2656d859bb515a02c3bd339771c1bce5ad3bf526a08eba9978b7c",
+      "litert_probabilities": [
+        0.333333,
+        0.333337,
+        0.33333
+      ]
+    },
+    {
+      "name": "06-lesion-480x360",
+      "image_sha256": "a15a171ba4a357c5384ce2bce92e2190e04c3171a4fd90ff45099d7c695ee0e1",
+      "input_sha256": "dab9e16cb4385466f2d06dbac9e8a372b4dbf427682491e2cc3330a5f1a80a55",
+      "litert_probabilities": [
+        0.333333,
+        0.333337,
+        0.33333
+      ]
+    },
+    {
+      "name": "07-lesion-640x480",
+      "image_sha256": "6fca1e496ea0982197314fd5bb90968b1bc626da38666f331080187f2e980ccd",
+      "input_sha256": "c4c17e51443812f0e3942cc2c7645ec289e8001319d2ba1ab8663398c5ceba95",
+      "litert_probabilities": [
+        0.333332,
+        0.333338,
+        0.33333
+      ]
+    },
+    {
+      "name": "08-lesion-600x600",
+      "image_sha256": "75e1cb81d11c93f2228fbcdb78f055566bd2c23dd0eff27ead4fddb41618a089",
+      "input_sha256": "75bfe394922e4c5622c4aa5fb10a58eff7b14fbc38082e9b4eb5235def3fbc0f",
+      "litert_probabilities": [
+        0.333332,
+        0.333338,
+        0.33333
+      ]
+    },
+    {
+      "name": "09-lesion-420x300",
+      "image_sha256": "d8ecf1fda110d4f6e44b4c0f44f3da4898fc308d30032c917726a410017008a6",
+      "input_sha256": "ed0b25428d157c15f2d71055c0d490155f6127935a00b01c6f614df362ebad6c",
+      "litert_probabilities": [
+        0.333332,
+        0.33334,
+        0.333328
+      ]
+    },
+    {
+      "name": "10-lesion-540x720",
+      "image_sha256": "e0d8bb6359976b8512922f47a5fa3b898b88202c94010f5d47f3a1edff683cf4",
+      "input_sha256": "c44e60d00f652729db1246830b006b2b5b0ab482b255b321d77792c118a86658",
+      "litert_probabilities": [
+        0.333333,
+        0.333337,
+        0.33333
+      ]
+    },
+    {
+      "name": "11-lesion-256x256",
+      "image_sha256": "6891584cf71c007995abe882312fdc308af46352fb39670c9796a39eaac9667e",
+      "input_sha256": "f0d9d644d04d4ba3dcbf6b7356222008d301867f53c2ac3ce5cd9e636c3eece5",
+      "litert_probabilities": [
+        0.333332,
+        0.333338,
+        0.33333
+      ]
+    },
+    {
+      "name": "12-gradient-480x360",
+      "image_sha256": "888cae36c22dad061c1049d7fdd8dbcfd608352c8319ba78dbb80a367f03fab2",
+      "input_sha256": "bf31c6cdfa9e3123d232c715287b680ddc5c37ed9515089347ce848a0d4fb5c3",
+      "litert_probabilities": [
+        0.333332,
+        0.333337,
+        0.33333
+      ]
+    },
+    {
+      "name": "13-gradient-640x480",
+      "image_sha256": "721f2382ffa63ac14a87a536baf924904b369d58b55d6c78f1d853c0e9b1570d",
+      "input_sha256": "4c49dc1adb1ad3dada4c1b5830b949a1a2ae929377e817d9c089d935037c6f4f",
+      "litert_probabilities": [
+        0.333332,
+        0.333338,
+        0.33333
+      ]
+    },
+    {
+      "name": "14-gradient-600x600",
+      "image_sha256": "f31f6a6abec46c82508616b5d3dac219019e4be152e14f24f93c1333e265fdf1",
+      "input_sha256": "cbef9bf2bd3f46175481fc4cfa58d74baf00fc5bbff56d12abd3aa2a5aa6795d",
+      "litert_probabilities": [
+        0.333332,
+        0.333338,
+        0.333329
+      ]
+    },
+    {
+      "name": "15-gradient-420x300",
+      "image_sha256": "110e2325830e44bc0fd45e913eed9b0c42a5c04b390cc4a8caa026196b9976c9",
+      "input_sha256": "bc25b1d566c3dfb5844239d824a515d142ec10f454e306d764865a02104d66cb",
+      "litert_probabilities": [
+        0.333333,
+        0.333336,
+        0.333331
+      ]
+    },
+    {
+      "name": "16-gradient-540x720",
+      "image_sha256": "1e9528d82f80977684ca604c3793dd52452880019a7e5a04c6caf0687047e908",
+      "input_sha256": "8cd6fa2c6fd6bf070c6914d92bf2cd2e5e4b9bc88a6584456b7817f751cd7e35",
+      "litert_probabilities": [
+        0.333333,
+        0.333337,
+        0.333331
+      ]
+    },
+    {
+      "name": "17-gradient-256x256",
+      "image_sha256": "484623184fda28fe942054040649ec2b8774197e370bd2b71f3ada21a3094849",
+      "input_sha256": "cd6c1ad30e68348a3b0cb9a133737920bcbf67dd12a50b56a6adb5d2dba6455f",
+      "litert_probabilities": [
+        0.333333,
+        0.333337,
+        0.33333
+      ]
+    },
+    {
+      "name": "18-mixed-480x360",
+      "image_sha256": "056ffa48a6072c3fccf462c626b4e44ca73f44b0643724957c61b87507d26d39",
+      "input_sha256": "b8d30fd81a649f0fcbcc0ac001bcd4a1a51dded6ad331b556b0cb9aa11cc6b81",
+      "litert_probabilities": [
+        0.333332,
+        0.333337,
+        0.33333
+      ]
+    },
+    {
+      "name": "19-mixed-640x480",
+      "image_sha256": "5d2865edbcfbd7a225bf81696e27277d4baf0d25754168d15d2414fb195b8528",
+      "input_sha256": "5b2b6b5bee438e5a9b6b3110b152b7b89430cfb6f925f99dcfb346471d522b82",
+      "litert_probabilities": [
+        0.333332,
+        0.333338,
+        0.33333
+      ]
+    },
+    {
+      "name": "20-mixed-600x600",
+      "image_sha256": "8563ff6a1bdc334fd7328cf41fcfbf17a89aefe98988c6b3c9b8ad0a434f99e1",
+      "input_sha256": "6f25aafb228868f731fc6d2080d738100932d56d446658b097aa51232a4c24e6",
+      "litert_probabilities": [
+        0.333333,
+        0.333336,
+        0.333331
+      ]
+    },
+    {
+      "name": "21-mixed-420x300",
+      "image_sha256": "27de7dd101245386902ab0929f7fce1b38f74dda374cfc92cb8014baa54e602a",
+      "input_sha256": "6e7e591999fad79b51453eb628ec6072b9916757f41e0f4cdb5a52fad76dccff",
+      "litert_probabilities": [
+        0.333333,
+        0.333336,
+        0.333331
+      ]
+    },
+    {
+      "name": "22-mixed-540x720",
+      "image_sha256": "90138b1a9bb481dfc4a138b87cafe74b5d81c6da0ffa26d7f81679ed227f4c15",
+      "input_sha256": "c1a4820f7021d6c1e76af1d7c58ad30f205236e4d44e8c83692d864fc177ff0c",
+      "litert_probabilities": [
+        0.333333,
+        0.333337,
+        0.33333
+      ]
+    },
+    {
+      "name": "23-mixed-256x256",
+      "image_sha256": "6b2c05c72fa79f389d03fb4d7bed8ae3a45b1a0b3449e11d12df717f799a2638",
+      "input_sha256": "4f03bc654b26558db4c653a790f36539b9a80d367c81c3a14e5cb6f8693847b8",
+      "litert_probabilities": [
+        0.333332,
+        0.333337,
+        0.33333
+      ]
+    }
+  ]
+}
