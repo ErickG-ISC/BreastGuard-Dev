@@ -71,6 +71,7 @@ def _correlation(a: np.ndarray, b: np.ndarray) -> float:
 def run(model_dir: Path, use_keras: bool = True) -> dict:
     from backend.app.ml.config import ModelCard
     from backend.app.ml.heatmap import class_activation_map
+    from backend.app.ml.preprocess import PREPROCESSING_VERSION
     from backend.app.ml.runtime import LiteRTPredictor, to_model_input
 
     card = ModelCard.load(model_dir / "model_card.json")
@@ -123,6 +124,7 @@ def run(model_dir: Path, use_keras: bool = True) -> dict:
     summary = {
         "model_version": card.model_version,
         "preprocessing": card.preprocessing,
+        "preprocessing_version": PREPROCESSING_VERSION,
         "input_size": list(card.input_size),
         "color_mode": card.color_mode,
         "classes": list(card.classes),

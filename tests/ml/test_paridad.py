@@ -22,11 +22,20 @@ FINGERPRINTS = sorted(FIXTURES.glob("parity_*.json"))
 
 
 def _card(fp: dict) -> ModelCard:
-    return ModelCard.from_dict({**fp, "files": {}})
+    return ModelCard.from_dict({**fp, "is_demo": True, "files": {}})
 
 
 def test_hay_al_menos_una_huella():
     assert FINGERPRINTS, "Falta tests/fixtures/parity_<version>.json (ml_tools/parity --write)"
+
+
+@pytest.mark.parametrize("path", FINGERPRINTS, ids=lambda p: p.stem)
+def test_la_huella_es_de_la_version_vigente_del_preprocesamiento(path):
+    """Si alguien sube PREPROCESSING_VERSION, debe regenerar las huellas (y los modelos)."""
+    from backend.app.ml.preprocess import PREPROCESSING_VERSION
+
+    fp = json.loads(path.read_text(encoding="utf-8"))
+    assert fp["preprocessing_version"] == PREPROCESSING_VERSION
 
 
 def test_conjunto_sintetico_estable():
