@@ -102,6 +102,13 @@ PROTECTED = {
     "doctor_add_note": ("POST", f"{API}/doctor/patients/{SOME_ID}/notes", {"json": {"body": "x"}}),
     "doctor_update_note": ("PATCH", f"{API}/doctor/notes/{SOME_ID}", {"json": {"body": "x"}}),
     "doctor_delete_note": ("DELETE", f"{API}/doctor/notes/{SOME_ID}", {}),
+    "doctor_create_patient": ("POST", f"{API}/doctor/patients", {"json": {"display_name": "x"}}),
+    "doctor_add_analysis": (
+        "POST",
+        f"{API}/doctor/patients/{SOME_ID}/analyses",
+        {"files": {"file": ("eco.png", make_image_bytes("PNG"), "image/png")}},
+    ),
+    "doctor_review": ("PUT", f"{API}/doctor/analyses/{SOME_ID}/review", {"json": {"birads": "1"}}),
     # CU-01 (solo pacientes)
     "subscription_get": ("GET", f"{API}/subscription/me", {}),
     "subscription_put": ("PUT", f"{API}/subscription/me", {"json": {"plan_code": "plus"}}),
