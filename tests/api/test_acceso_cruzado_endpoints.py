@@ -109,6 +109,9 @@ PROTECTED = {
         {"files": {"file": ("eco.png", make_image_bytes("PNG"), "image/png")}},
     ),
     "doctor_review": ("PUT", f"{API}/doctor/analyses/{SOME_ID}/review", {"json": {"birads": "1"}}),
+    # CU-10 (solo la médica responsable)
+    "doctor_export_pdf": ("GET", f"{API}/doctor/analyses/{SOME_ID}/report.pdf", {}),
+    "doctor_export_hl7": ("GET", f"{API}/doctor/analyses/{SOME_ID}/report.hl7", {}),
     # CU-01 (solo pacientes)
     "subscription_get": ("GET", f"{API}/subscription/me", {}),
     "subscription_put": ("PUT", f"{API}/subscription/me", {"json": {"plan_code": "plus"}}),
@@ -128,6 +131,7 @@ PROTECTED = {
     "analyses_list": ("GET", f"{API}/analyses", {}),
     "analyses_detail": ("GET", f"{API}/analyses/{SOME_ID}", {}),
     "analyses_delete": ("DELETE", f"{API}/analyses/{SOME_ID}", {}),
+    "analyses_export_pdf": ("GET", f"{API}/analyses/{SOME_ID}/report.pdf", {}),
     # CU-03 (solo pacientes)
     "self_exams_start": ("POST", f"{API}/self-exams", {}),
     "self_exams_finish": (
@@ -194,6 +198,7 @@ PATIENT_ONLY_ENDPOINTS = [
     "analyses_list",
     "analyses_detail",
     "analyses_delete",
+    "analyses_export_pdf",
     "self_exams_start",
     "self_exams_finish",
     "self_exams_list",
