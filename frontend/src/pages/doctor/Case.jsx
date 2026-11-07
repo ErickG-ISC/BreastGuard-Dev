@@ -10,11 +10,15 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  FormControl,
   Grid,
+  InputLabel,
   Link,
   List,
   ListItemButton,
   ListItemText,
+  MenuItem,
+  Select,
   Slider,
   Stack,
   TextField,
@@ -25,8 +29,12 @@ import { Link as RouterLink, useParams } from 'react-router-dom';
 import { api, errorMessage } from '../../api/client';
 import { DISCLAIMER } from '../../components/Layout';
 import {
+  BIRADS,
+  LATERALITY,
   NOTICED,
   ORIGIN,
+  PROTOTYPE_WARNING,
+  VIEW,
   SIDE,
   STATUS,
   SYMPTOM,
@@ -54,20 +62,30 @@ function Section({ title, children, action }) {
   );
 }
 
-// Ecografía con el mapa de calor superpuesto y su opacidad (D02). Las URLs son firmadas y cortas.
+// Imagen con el mapa de calor superpuesto y su opacidad (D02, D03). URLs firmadas y cortas.
 function Viewer({ analysis }) {
   const [opacity, setOpacity] = useState(50);
   if (!analysis) return <Typography color="text.secondary">Sin análisis.</Typography>;
+  const meta = analysis.dicom_meta;
   return (
     <Stack spacing={1}>
-      <Box sx={{ position: 'relative', bgcolor: 'imaging.main', borderRadius: 1, overflow: 'hidden' }}>
-        <Box component="img" src={analysis.image_url} alt="Ecografía" sx={{ display: 'block', width: '100%' }} />
-        <Box
-          component="img"
-          src={analysis.heatmap_url}
-          alt="Mapa de calor del modelo"
-          sx={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: opacity / 100 }}
-        />
+      {analysis.prototype_warning && <Alert severity="warning">{analysis.prototype_warning}</Alert>}
+      {/* Una mastografía es vertical: la altura se limita y el mapa de calor sigue a la imagen */}
+      <Box sx={{ display: 'flex', justifyContent: 'center', bgcolor: 'imaging.main', borderRadius: 1, overflow: 'hidden' }}>
+        <Box sx={{ position: 'relative', lineHeight: 0 }}>
+          <Box
+            component="img"
+            src={analysis.image_url}
+            alt={analysis.profile === 'mastografia_prototipo' ? 'Mastografía' : 'Ecografía'}
+            sx={{ display: 'block', maxWidth: '100%', maxHeight: '70vh' }}
+          />
+          <Box
+            component="img"
+            src={analysis.heatmap_url}
+            alt="Mapa de calor del modelo"
+            sx={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: opacity / 100 }}
+          />
+        </Box>
       </Box>
       <Typography id="opacidad" variant="body2">
         Opacidad del mapa de calor
@@ -80,9 +98,112 @@ function Viewer({ analysis }) {
           Modelo {analysis.model_version}
         </Typography>
       </Stack>
+      {meta && (
+        <Typography variant="body2" color="text.secondary">
+          DICOM {meta.modality ?? ''} · vista {VIEW[meta.view_position] ?? meta.view_position ?? '—'} · lateralidad{' '}
+          {LATERALITY[meta.laterality] ?? meta.laterality ?? '—'} · {meta.columns}×{meta.rows} px
+        </Typography>
+      )}
       <Alert severity="info" variant="outlined">
         Apoyo al diagnóstico: el modelo orienta; la decisión clínica es de la médica.
       </Alert>
+    </Stack>
+  );
+}
+
+// Reporte técnico (D03): la categoría BI-RADS la asigna la médica; el modelo NO la sugiere.
+function TechnicalReport({ analysis, onSave, busy, disabled }) {
+  const [birads, setBirads] = useState(analysis.review?.birads ?? '');
+  const [recommendation, setRecommendation] = useState(analysis.review?.recommendation ?? '');
+  const review = analysis.review;
+  return (
+    <Stack spacing={2}>
+      <Typography variant="body2">
+        Modelo: <strong>{resultText(analysis)}</strong> · confianza {percent(analysis.confidence)} ·{' '}
+        {analysis.model_version}
+      </Typography>
+      <FormControl size="small" sx={{ maxWidth: 360 }}>
+        <InputLabel id={`birads-${analysis.id}`}>Categoría BI-RADS asignada por la médica</InputLabel>
+        <Select
+          labelId={`birads-${analysis.id}`}
+          label="Categoría BI-RADS asignada por la médica"
+          value={birads}
+          onChange={(e) => setBirads(e.target.value)}
+          disabled={disabled}
+        >
+          {BIRADS.map((b) => (
+            <MenuItem key={b.value} value={b.value}>
+              {b.label}
+            </MenuItem>
+          ))}
+        </Select>
+      </FormControl>
+      <TextField
+        label="Recomendación de la médica"
+        multiline
+        minRows={2}
+        value={recommendation}
+        onChange={(e) => setRecommendation(e.target.value)}
+        disabled={disabled}
+        slotProps={{ htmlInput: { maxLength: 2000 } }}
+      />
+      <Stack direction="row" sx={{ gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+        <Button
+          variant="contained"
+          disabled={!birads || busy || disabled}
+          onClick={() => onSave({ birads, recommendation: recommendation.trim() || null })}
+        >
+          Guardar revisión
+        </Button>
+        {review && (
+          <Typography variant="caption" color="text.secondary">
+            Última revisión: {review.reviewed_by_name} · {formatDateTime(review.updated_at)}
+          </Typography>
+        )}
+      </Stack>
+      <Typography variant="caption" color="text.secondary">
+        El modelo no asigna ni sugiere BI-RADS. La exportación a PDF y HL7 llega en la Semana 5.
+      </Typography>
+    </Stack>
+  );
+}
+
+// Carga de estudios de la médica (D03): DICOM, JPG o PNG. El original DICOM nunca se guarda.
+function StudyUpload({ onUpload, busy, disabled }) {
+  const [file, setFile] = useState(null);
+  const inputRef = useRef(null);
+  async function submit(event) {
+    event.preventDefault();
+    if (await onUpload(file)) {
+      setFile(null);
+      if (inputRef.current) inputRef.current.value = '';
+    }
+  }
+  return (
+    <Stack spacing={2} component="form" onSubmit={submit}>
+      <Alert severity="warning">{PROTOTYPE_WARNING}</Alert>
+      <Button variant="outlined" component="label" disabled={busy || disabled} sx={{ alignSelf: 'flex-start' }}>
+        Elegir archivo DICOM, JPG o PNG
+        <input
+          ref={inputRef}
+          hidden
+          type="file"
+          accept=".dcm,.dicom,application/dicom,image/png,image/jpeg"
+          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+        />
+      </Button>
+      {file && (
+        <Typography variant="body2" sx={{ wordBreak: 'break-all' }}>
+          {file.name} · {(file.size / 1024 / 1024).toFixed(1)} MB
+        </Typography>
+      )}
+      <Button type="submit" variant="contained" disabled={!file || busy || disabled} sx={{ alignSelf: 'flex-start' }}>
+        {busy ? 'Analizando…' : 'Analizar estudio'}
+      </Button>
+      <Typography variant="caption" color="text.secondary">
+        Se guarda solo una imagen derivada, sin datos personales. Máximo 60 MB y 4096 px por lado; JPEG Lossless no
+        está soportado.
+      </Typography>
     </Stack>
   );
 }
@@ -291,7 +412,7 @@ export default function Case() {
           </Section>
         </Grid>
         <Grid size={{ xs: 12, md: 8 }}>
-          <Section title="Ecografía y mapa de calor">
+          <Section title="Imagen y mapa de calor">
             <Viewer key={analysis?.id} analysis={analysis} />
           </Section>
         </Grid>
@@ -355,12 +476,37 @@ export default function Case() {
           </Section>
         </Grid>
         <Grid size={{ xs: 12, md: 6 }}>
-          {/* Rama D (CU-09): análisis DICOM y reporte técnico con BI-RADS de la médica */}
-          <Section title="Análisis DICOM y reporte técnico">
-            <Typography color="text.secondary">
-              Próximamente: carga de mastografías DICOM (prototipo) y reporte técnico con la categoría BI-RADS asignada
-              por la médica.
-            </Typography>
+          {/* CU-09: estudios de la médica y reporte técnico con BI-RADS de la médica */}
+          <Section title="Agregar estudio">
+            <StudyUpload
+              busy={busy}
+              disabled={handoverBlocks}
+              onUpload={(file) => {
+                const form = new FormData();
+                form.append('file', file);
+                return run(
+                  () => api.post(`/doctor/patients/${id}/analyses`, form).then(() => setSelected(0)),
+                  'Estudio analizado. El caso vuelve a pendiente.',
+                );
+              }}
+            />
+          </Section>
+        </Grid>
+        <Grid size={{ xs: 12 }}>
+          <Section title="Reporte técnico">
+            {!analysis ? (
+              <Typography color="text.secondary">Elige un análisis para revisarlo.</Typography>
+            ) : (
+              <TechnicalReport
+                key={`${analysis.id}-${analysis.review?.updated_at ?? ''}`}
+                analysis={analysis}
+                busy={busy}
+                disabled={handoverBlocks}
+                onSave={(review) =>
+                  run(() => api.put(`/doctor/analyses/${analysis.id}/review`, review), 'Revisión guardada.')
+                }
+              />
+            )}
           </Section>
         </Grid>
       </Grid>
