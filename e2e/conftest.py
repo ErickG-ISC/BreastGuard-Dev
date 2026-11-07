@@ -8,7 +8,8 @@ Levanta todo en la máquina:
 - Chromium sin interfaz.
 
 Uso, desde la raíz: `pytest e2e -q` (requiere `pip install -r requirements-e2e.txt` y
-`python -m playwright install chromium`). Solo datos sintéticos.
+`python -m playwright install chromium`). Con `E2E_HEADED=1` el navegador se ve y va más lento.
+Solo datos sintéticos.
 """
 
 from tests import pgtest  # isort: skip  (fija las variables de entorno de prueba)
@@ -142,8 +143,10 @@ def stack():
 def browser():
     from playwright.sync_api import sync_playwright
 
+    # E2E_HEADED=1: navegador visible y más lento (sirve como plan B de la demo, sin red)
+    headed = os.environ.get("E2E_HEADED") == "1"
     with sync_playwright() as playwright:
-        chromium = playwright.chromium.launch()
+        chromium = playwright.chromium.launch(headless=not headed, slow_mo=500 if headed else 0)
         yield chromium
         chromium.close()
 
