@@ -62,6 +62,7 @@ CLAUDE.md. Todo con **datos sintéticos**: ninguna imagen ni dato de pacientes r
 | 3 | 4 min | Paciente → doctora | **Compartir:** "Compartir con mi médica", elegir el análisis, aceptar el consentimiento y obtener el código y el QR. La doctora (otra ventana) va a "Importar paquete", pega el código, abre el caso desde el panel ("Casos sospechosos"), ve la línea de tiempo y el mapa de calor, escribe una nota y marca revisado. La paciente ve "Importado por…" en "Mis paquetes". Mostrar que el **segundo uso del código falla**. |
 | 4 | 2 min | Doctora de otro tenant | **Aislamiento:** con la doctora del Hospital Sur, el panel está vacío y pegar la URL del caso de la Norte da "Paciente no encontrada". |
 | 5 | 2 min | Doctora | **Extra, si hay tiempo:** en el caso, "Agregar estudio" con el DICOM sintético. Aparece el aviso de prototipo y la doctora asigna el BI-RADS (el modelo no lo sugiere). |
+| 6 | 1 min | Doctora | **Extra (CU-10):** en el caso revisado, "Descargar PDF" y "Descargar HL7" (simulación, no probada contra un sistema hospitalario). El id del reporte coincide con la exportación en la bitácora. |
 | — | resto | — | Preguntas. |
 
 Frases clave:
