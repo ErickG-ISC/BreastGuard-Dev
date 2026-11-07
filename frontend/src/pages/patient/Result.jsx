@@ -7,6 +7,7 @@ import {
   Button,
   Chip,
   CircularProgress,
+  Link,
   Paper,
   Slider,
   Stack,
@@ -127,7 +128,10 @@ export default function Result() {
           </AccordionSummary>
           <AccordionDetails>
             <Typography variant="body2" sx={{ mb: 1 }}>
-              Modelo: {analysis.model_version}
+              Modelo: {analysis.model_version} ·{' '}
+              <Link component={RouterLink} to="/acerca-del-modelo">
+                Acerca del modelo
+              </Link>
             </Typography>
             {report.level === 'inconclusive' && (
               <Typography variant="body2" color="warning.main" sx={{ mb: 1 }}>

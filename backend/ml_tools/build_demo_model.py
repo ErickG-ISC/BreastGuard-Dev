@@ -18,6 +18,8 @@ from pathlib import Path
 
 import numpy as np
 
+from backend.app.ml.preprocess import PREPROCESSING_VERSION
+
 MODEL_VERSION = "demo-effb0-untrained-1"
 CLASSES = ["normal", "benigno", "maligno"]
 INPUT_SIZE = 224
@@ -80,6 +82,7 @@ def build(out: Path) -> dict:
         "input_size": [INPUT_SIZE, INPUT_SIZE],
         "color_mode": "rgb",
         "preprocessing": PREPROCESSING,
+        "preprocessing_version": PREPROCESSING_VERSION,
         "head": "global_average_pooling+dense_softmax",
         "files": {name: sha256(out / name) for name in ("model.tflite", "head.npz")},
         "keras_vs_tflite_max_abs_diff": max_diff,

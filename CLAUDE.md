@@ -192,7 +192,7 @@ SPA estándar: `main.jsx` monta `App.jsx` (tema, `AuthProvider` y rutas con `rea
 - `api/client.js`: axios con el Bearer del JWT, guardado en `sessionStorage`; un 401 cierra la sesión.
 - `auth/AuthContext.jsx`: login (`/auth/token`) y el usuario actual (`/auth/me`).
 - `components/ProtectedRoute.jsx` (por rol) y `components/Layout.jsx`, con el aviso de herramienta de apoyo.
-- Rutas públicas: `/`, `/login`, `/registro`, `/importar`. Médica: `/medico` (panel), `/medico/pacientes/:id` (caso) y `/medico/importar`. Paciente: `/paciente`, `/cuestionario`, `/analizar`, `/resultado/:id`, `/historial`, `/diario`, `/mas`, `/autoexploracion`, `/recordatorios`, `/informacion`, `/informacion/:slug`. Públicas: `/baja` (confirmar baja del correo) e `/invitacion` (fijar contraseña con el enlace).
+- Rutas públicas: `/`, `/login`, `/registro`, `/importar`, `/acerca-del-modelo`. Médica: `/medico` (panel), `/medico/pacientes/:id` (caso) y `/medico/importar`. Paciente: `/paciente`, `/cuestionario`, `/analizar`, `/resultado/:id`, `/historial`, `/diario`, `/mas`, `/autoexploracion`, `/recordatorios`, `/informacion`, `/informacion/:slug`. Públicas: `/baja` (confirmar baja del correo) e `/invitacion` (fijar contraseña con el enlace).
 - `components/AdminShell.jsx` (barra lateral D04, cajón en móvil) y `components/admin/` (`StaffManager`, `EventsLog`, `IsolationDialog`), compartidos por:
   - `platform_admin`: `/admin/tenants`, `/admin/tenants/:id` (datos, usuarios, bitácora, chequeo, desactivar y solicitar purga) y `/admin/auditoria`;
   - `tenant_admin`: `/institucion/usuarios` y `/institucion/bitacora`.
@@ -244,6 +244,12 @@ Estado: **modelo de demostración** (EfficientNet-B0 sin entrenar, 3 clases, `is
 
 - **Producción sin TensorFlow.** La inferencia corre con **LiteRT** (`ai-edge-litert`). Medido en Docker con 512 MB (ADR 0013): 187 MB con la app y una ecografía; 304–357 MB con una mastografía de 4096 px; 419 MB en el peor caso (2 JPEG 2000 a la vez; válvula `MAX_STUDIES_IN_FLIGHT=1`). TensorFlow con la app llega a 479 MB: no cabe. Paridad Keras↔LiteRT con `ml_tools/parity.py` y huella en `tests/fixtures/parity_<version>.json` (el CI verifica que el preprocesamiento da los mismos tensores). TensorFlow está solo en `requirements-ml.txt`, para `backend/ml_tools/` (`build_demo_model`, `measure_memory`, `upload_model`).
 - **`model_card.json`** es la única fuente de clases (2 o 3, con alias benign/malignant), tamaño de entrada, preprocesamiento (`raw_0_255` para el EfficientNet de Keras, que normaliza **dentro**), `model_version` y sha256 de cada archivo.
+- **Tarjeta v2 (ADR 0014)**, campos opcionales pero validados (inválido ⇒ el modelo no carga):
+  - `calibration` (temperatura, aplicada al servir en `runtime._probabilities`: la confianza, el reporte y "sospechoso" usan la probabilidad calibrada);
+  - `preprocessing_version` (obligatorio en un modelo real; debe coincidir con `ml/preprocess.PREPROCESSING_VERSION`, el preprocesamiento único que el entrenamiento importa o copia);
+  - `description`, `intended_use`, `training`, `metrics`, `limitations` (públicos en `GET /model/card` y `/acerca-del-modelo`, por lista blanca);
+  - `recommended_thresholds` (solo informativo; los umbrales siguen solo en `MLSettings`).
+- Integrar un modelo nuevo: `ml_tools/validate_model.py` (+ huella de paridad), `measure_memory`, `threshold_effect.py` si cambian los umbrales, y luego `upload_model.py` a un prefijo nuevo y `MODEL_PREFIX`. Los análisis previos conservan su versión y su reporte; nunca se recalculan.
 - **Carga:** el modelo se carga **una sola vez** en el lifespan, desde `MODEL_DIR` o descargado del bucket privado `MODEL_BUCKET/MODEL_PREFIX`. Si falla, `/health` muestra `model: unavailable` y el análisis responde 503.
 - **`backend/app/ml/`:**
   - `runtime.py`: `LiteRTPredictor` y `FakePredictor` para pruebas;

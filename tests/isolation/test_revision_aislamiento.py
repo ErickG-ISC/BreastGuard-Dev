@@ -33,6 +33,8 @@ PUBLIC_ROUTES = {
     ("GET", "/api/v1/blog"),
     ("GET", "/api/v1/blog/faq"),
     ("GET", "/api/v1/blog/{slug}"),
+    # Ficha pública del modelo (ADR 0014): solo campos de la ficha, sin datos de pacientes
+    ("GET", "/api/v1/model/card"),
 }
 # Autenticadas con un secreto compartido, no con JWT (tests/api/test_dispatcher.py)
 SECRET_ROUTES = {

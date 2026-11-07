@@ -1,6 +1,7 @@
 {
   "model_version": "demo-effb0-untrained-1",
   "preprocessing": "raw_0_255",
+  "preprocessing_version": 1,
   "input_size": [
     224,
     224

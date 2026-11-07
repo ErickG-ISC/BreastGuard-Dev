@@ -5,7 +5,7 @@ El backend va en **Render** (plan gratuito, unos 512 MB) y el frontend en **Verc
 ## 0. Antes de desplegar (una vez, desde tu computadora)
 1. Migra la base, siempre a mano y nunca en el build de Render: `alembic -c backend/alembic.ini upgrade head`.
 2. Revisa en Supabase que tanto `medical_images` como `ml-models` sean buckets **privados**. Para el primero puedes usar `python -m backend.scripts.check_storage`.
-3. Si el modelo aún no está en el bucket, súbelo: `python -m backend.ml_tools.upload_model --model-dir <carpeta>`.
+3. Si el modelo aún no está en el bucket, súbelo: `python -m backend.ml_tools.upload_model --model-dir <carpeta>`. Para un modelo **nuevo**, antes: `python -m backend.ml_tools.validate_model --model-dir <carpeta> --fingerprint tests/fixtures/parity_<version>.json` y la medición de memoria (ADR 0013). Súbelo a un prefijo nuevo y cambia `MODEL_PREFIX` en Render (ADR 0014, sección 7).
 
 ## 1. Backend en Render
 1. En Render: **New → Blueprint** y elige el repo. Render lee `render.yaml`.

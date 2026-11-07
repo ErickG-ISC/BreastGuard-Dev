@@ -28,6 +28,7 @@ import DoctorPanel from './pages/doctor/Panel';
 import DoctorCase from './pages/doctor/Case';
 import DoctorImport from './pages/doctor/Import';
 import ImportLink from './pages/ImportLink';
+import AboutModel from './pages/AboutModel';
 import Share from './pages/patient/Share';
 import MyShares from './pages/patient/MyShares';
 import AdminShell from './components/AdminShell';
@@ -61,6 +62,7 @@ function App() {
             <Route path="/baja" element={<Unsubscribe />} />
             <Route path="/invitacion" element={<AcceptInvitation />} />
             <Route path="/importar" element={<ImportLink />} />
+            <Route path="/acerca-del-modelo" element={<AboutModel />} />
             {/* Administración de plataforma (wireframe D04) */}
             <Route
               element={

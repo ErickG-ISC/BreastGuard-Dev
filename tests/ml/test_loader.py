@@ -16,6 +16,7 @@ def card(files: dict[str, bytes] | None = None, listed: dict | None = None) -> b
     files = GOOD if files is None else files
     data = {
         "model_version": "fake",
+        "preprocessing_version": 1,
         "classes": ["normal", "benigno", "maligno"],
         "input_size": [224, 224],
         "preprocessing": "raw_0_255",

@@ -1,4 +1,5 @@
-import { AppBar, Box, Button, Container, Toolbar, Typography } from '@mui/material';
+import { AppBar, Box, Button, Container, Link, Toolbar, Typography } from '@mui/material';
+import { Link as RouterLink } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 
 export const DISCLAIMER =
@@ -24,7 +25,10 @@ export default function Layout({ children }) {
       <Container maxWidth="md" sx={{ py: 3, px: 2 }}>
         {children}
         <Typography variant="caption" color="text.secondary" component="p" sx={{ mt: 4 }}>
-          {DISCLAIMER}
+          {DISCLAIMER}{' '}
+          <Link component={RouterLink} to="/acerca-del-modelo">
+            Acerca del modelo
+          </Link>
         </Typography>
       </Container>
     </Box>
