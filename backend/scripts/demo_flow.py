@@ -58,6 +58,7 @@ from backend.app.services import (  # noqa: E402
 )
 from backend.app.services.auth import AuthContext, register_patient  # noqa: E402
 from backend.app.services.images import ValidatedImage  # noqa: E402
+from backend.scripts.demo_env import require_development  # noqa: E402
 
 DEMO_PREFIX = "demo-"
 DEMO_DOMAIN = "demo.invalid"
@@ -121,6 +122,7 @@ def _doctor(slug: str, doctor_email: str | None) -> tuple[Tenant, User]:
 
 
 def create_flow(storage, slug: str, doctor_email: str | None = None) -> FlowResult:
+    require_development()
     tenant, doctor = _doctor(slug, doctor_email)
     doctor_auth = AuthContext(doctor.id, tenant.id, tenant.slug, "doctor")
     consent = current_consent()
@@ -222,6 +224,7 @@ def create_flow(storage, slug: str, doctor_email: str | None = None) -> FlowResu
 
 def clean_flow(engine: Engine, storage) -> dict[str, int]:
     """Rol dueño con BYPASSRLS. Solo cuentas demo del b2c y copias en tenants demo-…"""
+    require_development()
     deleted: dict[str, int] = {}
     with engine.begin() as conn:
         if not conn.execute(

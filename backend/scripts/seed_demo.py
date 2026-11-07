@@ -41,6 +41,7 @@ from backend.app.models.clinical import (  # noqa: E402
 )
 from backend.app.models.control import Tenant, User  # noqa: E402
 from backend.app.services import admin_events, audit, invitations  # noqa: E402
+from backend.scripts.demo_env import require_development  # noqa: E402
 from backend.scripts.purge_tenant import PurgeSummary, purge_tenant  # noqa: E402
 
 DEMO_PREFIX = "demo-"
@@ -97,6 +98,7 @@ def create_demo(
     admin_email: str | None = None,
     name: str = "Clínica de Demostración",
 ) -> DemoResult:
+    require_development()
     _check_slug(slug)
     with new_session() as db:
         if db.scalars(select(Tenant.id).where(Tenant.slug == slug)).first():
@@ -203,6 +205,7 @@ def create_demo(
 
 
 def clean_demo(engine: Engine, slug: str = "demo-clinica") -> PurgeSummary:
+    require_development()
     _check_slug(slug)
     return purge_tenant(engine, slug)
 

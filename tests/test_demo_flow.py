@@ -12,6 +12,12 @@ from backend.scripts.demo_flow import DemoFlowError, clean_flow, create_flow
 pytestmark = pytest.mark.usefixtures("database")
 
 
+@pytest.fixture(autouse=True)
+def development(monkeypatch):
+    """Los scripts de demo solo corren con BREASTGUARD_ENV=development."""
+    monkeypatch.setenv("BREASTGUARD_ENV", "development")
+
+
 @pytest.fixture
 def demo(tenant_factory, user_factory, b2c_tenant):
     tenant = tenant_factory("demo-clinica-norte")

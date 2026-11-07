@@ -9,6 +9,12 @@ from tests.helpers import auth_headers
 pytestmark = pytest.mark.usefixtures("database")
 
 
+@pytest.fixture(autouse=True)
+def development(monkeypatch):
+    """Los scripts de demo solo corren con BREASTGUARD_ENV=development."""
+    monkeypatch.setenv("BREASTGUARD_ENV", "development")
+
+
 def counts(owner_engine, tenant_id) -> dict[str, int]:
     tables = [
         "clinical.patients",
