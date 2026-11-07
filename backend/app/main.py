@@ -21,6 +21,7 @@ from backend.app.api.v1 import (
     images,
     institution,
     internal,
+    model_card,
     onboarding,
     reminders,
     self_exams,
@@ -97,6 +98,7 @@ app.include_router(symptoms.router, prefix="/api/v1/symptoms")
 app.include_router(reminders.router, prefix="/api/v1")
 app.include_router(internal.router, prefix="/api/v1")
 app.include_router(blog.router, prefix="/api/v1")
+app.include_router(model_card.router, prefix="/api/v1")
 app.include_router(doctor.router, prefix="/api/v1/doctor")
 app.include_router(shares.router, prefix="/api/v1/shares")
 
